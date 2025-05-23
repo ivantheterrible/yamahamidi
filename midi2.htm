@@ -9,8 +9,8 @@
     header {
       position: fixed; top: 0; left: 0; right: 0;
       background: #333; color: #fff;
-      padding: 0.5em 1em; z-index: 1000;
-      display: flex; flex-wrap: wrap; align-items: center;
+      padding: 0.5em 1em; z-index:1000;
+      display: flex; align-items: center; flex-wrap: wrap;
     }
     header > * { margin-right: 1em; }
     select, button, label {
@@ -24,9 +24,15 @@
       font-size: 1.2em;
     }
     #perfArea { margin-top: 3.5em; }
-    #pluckArea { width: 100%; height: 50vh; background: #fff; touch-action: none; display: block; }
+    #pluckArea {
+      width: 100%; height: 50vh;
+      background: #fff; touch-action: none;
+      display: block;
+    }
     #configArea { padding: 1em; }
   </style>
+  <!-- load VOICE_LIST as a global -->
+  <script src="voice_list.js"></script>
 </head>
 <body>
   <header>
@@ -44,7 +50,7 @@
     <label for="voiceSelect">Voice:</label>
     <select id="voiceSelect"></select>
 
-    <label><input type="checkbox" id="noteOffToggle" checked> Send Note-Off on release</label>
+    <label><input type="checkbox" id="noteOffToggle" checked> Send Note-Off</label>
 
     <label for="layoutSelect">Layout:</label>
     <select id="layoutSelect"></select>
@@ -56,262 +62,247 @@
   <div id="perfArea">
     <canvas id="pluckArea"></canvas>
   </div>
-
   <div id="configArea" hidden>
     <p>Settings here</p>
   </div>
-  
-  <script src="voice_list.js"></script>
 
-  <script type="module">
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    // UI refs
+    const midiOutSelect  = document.getElementById('midiOutSelect'),
+          channelSelect  = document.getElementById('channelSelect'),
+          categorySelect = document.getElementById('categorySelect'),
+          voiceSelect    = document.getElementById('voiceSelect'),
+          noteOffToggle  = document.getElementById('noteOffToggle'),
+          layoutSelect   = document.getElementById('layoutSelect'),
+          baseNoteSelect = document.getElementById('baseNoteSelect'),
+          toggleBtn      = document.getElementById('toggleBtn'),
+          perfArea       = document.getElementById('perfArea'),
+          configArea     = document.getElementById('configArea'),
+          canvas         = document.getElementById('pluckArea'),
+          ctx2           = canvas.getContext('2d');
 
-  // UI references
-  const midiOutSelect   = document.getElementById('midiOutSelect');
-  const channelSelect   = document.getElementById('channelSelect');
-  const categorySelect  = document.getElementById('categorySelect');
-  const voiceSelect     = document.getElementById('voiceSelect');
-  const noteOffToggle   = document.getElementById('noteOffToggle');
-  const layoutSelect    = document.getElementById('layoutSelect');
-  const baseNoteSelect  = document.getElementById('baseNoteSelect');
-  const toggleBtn       = document.getElementById('toggleBtn');
-  const perfArea        = document.getElementById('perfArea');
-  const configArea      = document.getElementById('configArea');
-  const canvas          = document.getElementById('pluckArea');
-  const ctx2            = canvas.getContext('2d');
-
-  // Note names
-  const NOTE_NAMES = ["C","C♯/D♭","D","D♯/E♭","E","F","F♯/G♭","G","G♯/A♭","A","A♯/B♭","B"];
-
-  // All scales restored
-  const KEYBOARD_LAYOUTS = {
-    pentatonic:     [48,50,52,55,57,60,62,64,67,69,72,74,76,79,81,84],
-    minorPent:      [48,51,53,55,58,60,63,65,67,70,72,75,77,79,82,84],
-    egyptian:       [48,50,53,55,58,60,62,65,67,70,72,74,77,79,82,84],
-    inSen:          [48,49,53,55,58,60,61,65,67,70,72,73,77,79,82,84],
-    kumoi:          [48,50,51,55,56,60,62,63,67,68,72,74,75,79,80,84],
-    iwato:          [48,49,53,54,58,60,61,65,66,70,72,73,77,78,82,84],
-    wtPent:         [48,50,52,54,56,60,62,64,66,68,72,74,76,78,80,84],
-    major:          [48,50,52,53,55,57,59,60,62,64,65,67,69,71,72,74,76,77,79,81,83,84],
-    naturalMinor:   [48,50,51,53,55,56,58,60,62,63,65,67,68,70,72,74,75,77,79,80,82,84],
-    wholeTone:      [48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84],
-    octatonic:      [48,49,51,52,54,55,57,58,60,61,63,64,66,67,69,70,72,73,75,76,78,79,81,82,84],
-    majorTriad:     [48,52,55,60,64,67,72,76,79,84],
-    dom7:           [48,52,55,58,60,64,67,70,72,76,79,82,84],
-    maj7:           [48,52,55,59,60,64,67,71,72,76,79,83,84],
-    minorTriad:     [48,51,55,60,63,67,72,75,79,84],
-    min7:           [48,51,55,58,60,63,67,70,72,75,79,82,84]
-  };
-
-  // Key colors
-  const NOTE_COLORS = {
-    0:'#D62828',1:'#E76F51',2:'#F4A261',3:'#E9C46A',
-    4:'#A8DADC',5:'#2A9D8F',6:'#43AA8B',7:'#577590',
-    8:'#3A0CA3',9:'#7209B7',10:'#F72585',11:'#B5179E'
-  };
-
-  let midiAccess, currentOutput;
-  let currentLayout = [];
-  let lastChannel = 0;
-
-  // build dynamic Channel selector
-  for(let i=0; i<16; i++){
-    const o = document.createElement('option');
-    o.value = i;
-    o.textContent = (i+1);
-    channelSelect.appendChild(o);
-  }
-  channelSelect.value = '0';
-
-  // populate Category dropdown
-  Object.keys(VOICE_LIST).forEach(cat => {
-    const o = document.createElement('option');
-    o.value = cat;
-    o.textContent = cat;
-    categorySelect.appendChild(o);
-  });
-  categorySelect.value = Object.keys(VOICE_LIST)[0];
-
-  // populate Layout & Base Note
-  Object.keys(KEYBOARD_LAYOUTS).forEach(name => {
-    const o = document.createElement('option');
-    o.value = name;
-    o.textContent = name;
-    layoutSelect.appendChild(o);
-  });
-  baseNoteSelect.innerHTML = '';
-  NOTE_NAMES.forEach((n,i) => {
-    const o = document.createElement('option');
-    o.value = i;
-    o.textContent = n;
-    baseNoteSelect.appendChild(o);
-  });
-
-  // MIDI init
-  navigator.requestMIDIAccess().then(ma => {
-    midiAccess = ma;
-    // outputs
-    midiOutSelect.innerHTML = '';
-    for(let out of ma.outputs.values()){
-      const o = document.createElement('option');
-      o.value = out.id;
-      o.textContent = out.name;
-      midiOutSelect.appendChild(o);
-    }
-    midiOutSelect.selectedIndex = 0;
-    currentOutput = ma.outputs.get(midiOutSelect.value);
-
-    // when output changes
-    midiOutSelect.onchange = () => {
-      currentOutput = ma.outputs.get(midiOutSelect.value);
-      dispatchVoice();
-      sendAllNotesOff(lastChannel);
+    // Constants
+    const NOTE_NAMES = ["C","C♯/D♭","D","D♯/E♭","E","F","F♯/G♭","G","G♯/A♭","A","A♯/B♭","B"];
+    const KEYBOARD_LAYOUTS = {
+      pentatonic:     [48,50,52,55,57,60,62,64,67,69,72,74,76,79,81,84],
+      minorPent:      [48,51,53,55,58,60,63,65,67,70,72,75,77,79,82,84],
+      egyptian:       [48,50,53,55,58,60,62,65,67,70,72,74,77,79,82,84],
+      inSen:          [48,49,53,55,58,60,61,65,67,70,72,73,77,79,82,84],
+      kumoi:          [48,50,51,55,56,60,62,63,67,68,72,74,75,79,80,84],
+      iwato:          [48,49,53,54,58,60,61,65,66,70,72,73,77,78,82,84],
+      wtPent:         [48,50,52,54,56,60,62,64,66,68,72,74,76,78,80,84],
+      major:          [48,50,52,53,55,57,59,60,62,64,65,67,69,71,72,74,76,77,79,81,83,84],
+      naturalMinor:   [48,50,51,53,55,56,58,60,62,63,65,67,68,70,72,74,75,77,79,80,82,84],
+      wholeTone:      [48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84],
+      octatonic:      [48,49,51,52,54,55,57,58,60,61,63,64,66,67,69,70,72,73,75,76,78,79,81,82,84],
+      majorTriad:     [48,52,55,60,64,67,72,76,79,84],
+      dom7:           [48,52,55,58,60,64,67,70,72,76,79,82,84],
+      maj7:           [48,52,55,59,60,64,67,71,72,76,79,83,84],
+      minorTriad:     [48,51,55,60,63,67,72,75,79,84],
+      min7:           [48,51,55,58,60,63,67,70,72,75,79,82,84]
+    };
+    const NOTE_COLORS = {
+      0:'#D62828',1:'#E76F51',2:'#F4A261',3:'#E9C46A',
+      4:'#A8DADC',5:'#2A9D8F',6:'#43AA8B',7:'#577590',
+      8:'#3A0CA3',9:'#7209B7',10:'#F72585',11:'#B5179E'
     };
 
-  }).catch(_=>{
-    alert('MIDI not supported');
-  });
+    let midiAccess, currentOutput, currentLayout = [], lastChannel = 0;
+    const activeTouches = {};
 
-  // dispatch bank + program change
-  function dispatchVoice(){
-    const chan = +channelSelect.value;
-    const [msb, lsb, pr] = voiceSelect.value.split(',').map(n=>+n);
-    // Bank Select
-    currentOutput.send([0xB0|chan, 0x00, msb]);
-    currentOutput.send([0xB0|chan, 0x20, lsb]);
-    // Program Change
-    currentOutput.send([0xC0|chan, pr]);
-  }
-
-  // when Category changes -> rebuild voices
-  categorySelect.onchange = () => {
-    const cat = categorySelect.value;
-    const list = VOICE_LIST[cat];
-    voiceSelect.innerHTML = '';
-    list.forEach(v => {
+    // build Channel selector
+    for (let i=0; i<16; i++) {
       const o = document.createElement('option');
-      o.value = `${v.msb},${v.lsb},${v.program}`;
-      o.textContent = v.name;
-      voiceSelect.appendChild(o);
-    });
-    voiceSelect.selectedIndex = 0;
-    dispatchVoice();
-  };
-  // when Voice or Channel changes
-  voiceSelect .onchange = dispatchVoice;
-  channelSelect.onchange = () => {
-    sendAllNotesOff(lastChannel);
-    dispatchVoice();
-    lastChannel = +channelSelect.value;
-  };
-
-  // note-off toggle: if re-enabled, clear current channel
-  noteOffToggle.onchange = () => {
-    if(noteOffToggle.checked) {
-      sendAllNotesOff(+channelSelect.value);
+      o.value = i; o.textContent = i+1;
+      channelSelect.appendChild(o);
     }
-  };
+    channelSelect.value = '0';
 
-  function sendAllNotesOff(chan){
-    currentOutput?.send([0xB0|chan, 123, 0]);
-  }
-  function sendNoteOn(note, vel, chan){
-    currentOutput?.send([0x90|chan, note, vel]);
-  }
-  function sendNoteOff(note, chan){
-    currentOutput?.send([0x80|chan, note, 0]);
-  }
+    // populate Category from VOICE_LIST
+    Object.keys(window.VOICE_LIST).forEach(cat => {
+      const o = document.createElement('option');
+      o.value = cat; o.textContent = cat;
+      categorySelect.appendChild(o);
+    });
+    categorySelect.value = Object.keys(window.VOICE_LIST)[0];
 
-  // Settings toggle
-  toggleBtn.onclick = ()=>{
-    const show = configArea.hidden;
-    configArea.hidden = !show;
-    perfArea.hidden   = show;
-    toggleBtn.textContent = show ? '🎹' : '⚙️';
-  };
+    // populate Layout & Base Note
+    Object.keys(KEYBOARD_LAYOUTS).forEach(name => {
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      layoutSelect.appendChild(o);
+    });
+    NOTE_NAMES.forEach((n,i) => {
+      const o = document.createElement('option');
+      o.value = i; o.textContent = n;
+      baseNoteSelect.appendChild(o);
+    });
 
-  // resize & layout
-  function updateLayout(){
-    const base = +baseNoteSelect.value;
-    currentLayout = KEYBOARD_LAYOUTS[ layoutSelect.value ]
-                      .map(n => n + base);
-    draw();
-  }
-  layoutSelect   .onchange = updateLayout;
-  baseNoteSelect .onchange = updateLayout;
-  window.onresize = () => {
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight * 0.5;
-    draw();
-  };
-  // initialize
-  window.dispatchEvent(new Event('resize'));
-  layoutSelect.value = Object.keys(KEYBOARD_LAYOUTS)[0];
-  baseNoteSelect.value = '0';
-  // kick off
-  categorySelect.onchange();
-  updateLayout();
-
-  // pointer-based strumming
-  const active = {};
-  canvas.addEventListener('pointerdown', e=>{
-    e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
-    handlePointer(e);
-  });
-  canvas.addEventListener('pointermove', e=>{
-    if(!(e.pointerId in active)) return;
-    handlePointer(e);
-  });
-  canvas.addEventListener('pointerup', e=>{
-    releasePointer(e);
-  });
-  canvas.addEventListener('pointercancel', e=>{
-    releasePointer(e);
-  });
-
-  function computeTouch(e){
-    const r = canvas.getBoundingClientRect();
-    const x = e.clientX - r.left, y = e.clientY - r.top;
-    const cols = currentLayout.length, wN = r.width/cols;
-    const idx = Math.min(cols-1, Math.max(0, Math.floor(x/wN)));
-    const py  = 1 - Math.max(0, Math.min(1, y/r.height));
-    return { idx, py };
-  }
-  function handlePointer(e){
-    const { idx, py } = computeTouch(e);
-    const note = currentLayout[idx];
-    const vel  = Math.round(py * 127);
-    const prev = active[e.pointerId];
-    if(prev?.noteIndex !== idx){
-      if(prev && noteOffToggle.checked){
-        sendNoteOff(prev.note, +channelSelect.value);
+    // MIDI init
+    navigator.requestMIDIAccess().then(ma => {
+      midiAccess = ma;
+      // outputs dropdown
+      midiOutSelect.innerHTML = '';
+      for (let out of midiAccess.outputs.values()) {
+        const o = document.createElement('option');
+        o.value = out.id; o.textContent = out.name;
+        midiOutSelect.appendChild(o);
       }
-      sendNoteOn(note, vel, +channelSelect.value);
-      active[e.pointerId] = { note, noteIndex: idx };
-    }
-  }
-  function releasePointer(e){
-    const t = active[e.pointerId];
-    delete active[e.pointerId];
-    if(t && noteOffToggle.checked){
-      sendNoteOff(t.note, +channelSelect.value);
-    }
-    canvas.releasePointerCapture(e.pointerId);
-  }
+      if (midiOutSelect.options.length) {
+        midiOutSelect.selectedIndex = 0;
+        currentOutput = midiAccess.outputs.get(midiOutSelect.value);
+      }
 
-  // draw keyboard
-  function draw(){
-    const w = canvas.width, h = canvas.height;
-    const cols = currentLayout.length, wN = w/cols;
-    ctx2.clearRect(0,0,w,h);
-    currentLayout.forEach((m,i)=>{
-      ctx2.fillStyle = NOTE_COLORS[m%12] || '#ccc';
-      ctx2.fillRect(i*wN,0,wN,h);
-      ctx2.strokeStyle='#000'; ctx2.strokeRect(i*wN,0,wN,h);
-      ctx2.fillStyle='#000'; ctx2.textAlign='center'; ctx2.textBaseline='middle';
-      ctx2.fillText(NOTE_NAMES[m%12], i*wN + wN/2, h/2);
+      midiOutSelect.onchange = () => {
+        currentOutput = midiAccess.outputs.get(midiOutSelect.value);
+        dispatchVoice();
+        sendAllNotesOff(lastChannel);
+      };
+
+      categorySelect.onchange = rebuildVoiceList;
+      voiceSelect.onchange    = dispatchVoice;
+      channelSelect.onchange  = () => {
+        sendAllNotesOff(lastChannel);
+        dispatchVoice();
+        lastChannel = +channelSelect.value;
+      };
+
+      rebuildVoiceList();
+      dispatchVoice();
+
+    }).catch(_ => alert('MIDI not supported'));
+
+    // rebuild voice dropdown
+    function rebuildVoiceList() {
+      const list = window.VOICE_LIST[categorySelect.value] || [];
+      voiceSelect.innerHTML = '';
+      list.forEach(v => {
+        const o = document.createElement('option');
+        o.value = `${v.msb},${v.lsb},${v.program}`;
+        o.textContent = v.name;
+        voiceSelect.appendChild(o);
+      });
+      voiceSelect.selectedIndex = 0;
+    }
+
+    // send Bank+Program
+    function dispatchVoice() {
+      if (!currentOutput) return;
+      const chan = +channelSelect.value;
+      const [msb, lsb, pr] = voiceSelect.value.split(',').map(Number);
+      currentOutput.send([0xB0|chan, 0x00, msb]);
+      currentOutput.send([0xB0|chan, 0x20, lsb]);
+      currentOutput.send([0xC0|chan, pr]);
+    }
+
+    function sendAllNotesOff(chan) {
+      if (!currentOutput) return;
+      currentOutput.send([0xB0|chan, 123, 0]);
+    }
+    function sendNoteOn(note, vel, chan) {
+      if (!currentOutput) return;
+      currentOutput.send([0x90|chan, note, vel]);
+    }
+    function sendNoteOff(note, chan) {
+      if (!currentOutput) return;
+      currentOutput.send([0x80|chan, note, 0]);
+    }
+
+    // settings toggle
+    toggleBtn.onclick = () => {
+      const show = configArea.hidden;
+      configArea.hidden = !show;
+      perfArea.hidden   = show;
+      toggleBtn.textContent = show ? '🎹' : '⚙️';
+    };
+
+    // layout & draw
+    layoutSelect.onchange = baseNoteSelect.onchange = updateLayout;
+    window.onresize = () => {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight * 0.5;
+      draw();
+    };
+
+    function updateLayout() {
+      const base = +baseNoteSelect.value;
+      currentLayout = KEYBOARD_LAYOUTS[ layoutSelect.value ].map(n => n + base);
+      draw();
+    }
+
+    // **draw() definition that was missing**
+    function draw() {
+      const w = canvas.width, h = canvas.height;
+      const cols = currentLayout.length, wN = w/cols;
+      ctx2.clearRect(0,0,w,h);
+      currentLayout.forEach((m,i) => {
+        ctx2.fillStyle   = NOTE_COLORS[m % 12] || '#ccc';
+        ctx2.fillRect(i*wN, 0, wN, h);
+        ctx2.strokeStyle = '#000';
+        ctx2.strokeRect(i*wN, 0, wN, h);
+        ctx2.fillStyle   = '#000';
+        ctx2.textAlign   = 'center';
+        ctx2.textBaseline= 'middle';
+        ctx2.fillText(NOTE_NAMES[m % 12], i*wN + wN/2, h/2);
+      });
+    }
+
+    // pointer strumming
+    canvas.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      handlePointer(e);
     });
-  }
+    canvas.addEventListener('pointermove', e => {
+      if (!(e.pointerId in activeTouches)) return;
+      handlePointer(e);
+    });
+    canvas.addEventListener('pointerup', e => {
+      releasePointer(e);
+    });
+    canvas.addEventListener('pointercancel', e => {
+      releasePointer(e);
+    });
+
+    function computeTouch(e) {
+      const r = canvas.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      const cols = currentLayout.length, wN = r.width/cols;
+      const idx = Math.min(cols-1, Math.max(0, Math.floor(x/wN)));
+      const py  = 1 - Math.max(0, Math.min(1, y/r.height));
+      return { idx, py };
+    }
+
+    function handlePointer(e) {
+      const { idx, py } = computeTouch(e);
+      const note = currentLayout[idx];
+      const vel  = Math.round(py * 127);
+      const prev = activeTouches[e.pointerId];
+      if (!prev || prev.idx !== idx) {
+        if (prev && noteOffToggle.checked) {
+          sendNoteOff(prev.note, +channelSelect.value);
+        }
+        sendNoteOn(note, vel, +channelSelect.value);
+        activeTouches[e.pointerId] = { note, idx };
+      }
+    }
+
+    function releasePointer(e) {
+      const t = activeTouches[e.pointerId];
+      delete activeTouches[e.pointerId];
+      if (t && noteOffToggle.checked) {
+        sendNoteOff(t.note, +channelSelect.value);
+      }
+      canvas.releasePointerCapture(e.pointerId);
+    }
+
+    // initial setup
+    window.dispatchEvent(new Event('resize'));
+    layoutSelect.value   = Object.keys(KEYBOARD_LAYOUTS)[0];
+    baseNoteSelect.value = '0';
+    updateLayout();
+  });
   </script>
 </body>
 </html>
