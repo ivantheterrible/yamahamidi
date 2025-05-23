@@ -8,7 +8,7 @@
     h2 { margin-top: 40px; }
     .controls { margin-bottom: 10px; }
     .keyboard { display: flex; gap: 10px; margin-bottom: 20px; }
-    button { padding: 20px; font-size: 16px; cursor: pointer; }
+    button { padding: 20px; font-size: 16px; cursor: pointer; touch-action: manipulation; }
     .slider { width: 200px; margin-left: 10px; }
   </style>
 </head>
@@ -173,30 +173,29 @@
         });
       });
 
-      document.getElementById('voice1').dispatchEvent(new Event('change'));
-      document.getElementById('voice2').dispatchEvent(new Event('change'));
-      document.getElementById('voice3').dispatchEvent(new Event('change'));
+      function sendNote(channel, note, on) {
+        if (!currentOutput) return;
+        const status = on ? 0x90 : 0x80;
+        const message = [status + channel, note, on ? 100 : 0];
+        currentOutput.send(message);
+      }
+
+      function setupKeyboard(id, channel) {
+        document.querySelectorAll(`#${id} button`).forEach((btn) => {
+          const note = parseInt(btn.dataset.note, 10);
+          btn.addEventListener('mousedown', () => sendNote(channel, note, true));
+          btn.addEventListener('mouseup', () => sendNote(channel, note, false));
+          btn.addEventListener('mouseleave', () => sendNote(channel, note, false));
+          btn.addEventListener('touchstart', (e) => { e.preventDefault(); sendNote(channel, note, true); });
+          btn.addEventListener('touchend',   (e) => { e.preventDefault(); sendNote(channel, note, false); });
+          btn.addEventListener('touchcancel',(e) => { e.preventDefault(); sendNote(channel, note, false); });
+        });
+      }
+
+      setupKeyboard('keyboard1', 0);
+      setupKeyboard('keyboard2', 1);
+      setupKeyboard('keyboard3', 2);
     });
-
-    function sendNote(channel, note, on) {
-      if (!currentOutput) return;
-      const status = on ? 0x90 : 0x80;
-      const message = [status + channel, note, on ? 100 : 0];
-      currentOutput.send(message);
-    }
-
-    function setupKeyboard(id, channel) {
-      document.querySelectorAll(`#${id} button`).forEach((btn) => {
-        const note = parseInt(btn.dataset.note, 10);
-        btn.addEventListener('mousedown', () => sendNote(channel, note, true));
-        btn.addEventListener('mouseup', () => sendNote(channel, note, false));
-        btn.addEventListener('mouseleave', () => sendNote(channel, note, false));
-      });
-    }
-
-    setupKeyboard('keyboard1', 0);
-    setupKeyboard('keyboard2', 1);
-    setupKeyboard('keyboard3', 2);
   </script>
 </body>
 </html>
