@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIDI Plucked-String Controller</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; padding-top: 3.5em; }
+    header { position: fixed; top: 0; left: 0; right: 0; background: #333; color: #fff; padding: 0.5em 1em; z-index:1000; display: flex; align-items: center; flex-wrap: wrap; }
+    header > * { margin-right: 1em; }
+    select, button, label { background: #555; color: #fff; border: none; padding: 0.3em; border-radius: 4px; font-size: 0.9em; }
+    #toggleBtn { border-radius: 50%; width: 2.5em; height: 2.5em; font-size: 1.2em; }
+    #perfArea { margin-top: 3.5em; }
+    #pluckArea { width: 100%; height: 50vh; background: #fff; touch-action: none; display: block; }
+    #configArea { padding: 1em; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="toggleBtn" aria-label="Toggle settings">⚙️</button>
+    <label for="midiOutSelect">MIDI Output:</label>
+    <select id="midiOutSelect"></select>
+    <label for="channelSelect">Channel:</label>
+    <select id="channelSelect">
+      <!-- Channels 1-16 -->
+      <option value="0">1</option><option value="1">2</option><option value="2">3</option><option value="3">4</option>
+      <option value="4">5</option><option value="5">6</option><option value="6">7</option><option value="7">8</option>
+      <option value="8">9</option><option value="9">10</option><option value="10">11</option><option value="11">12</option>
+      <option value="12">13</option><option value="13">14</option><option value="14">15</option><option value="15">16</option>
+    </select>
+    <label for="programSelect">Program:</label>
+    <select id="programSelect"></select>
+    <label><input type="checkbox" id="noteOffToggle" checked> Send Note-Off on release</label>
+    <label for="layoutSelect">Layout:</label>
+    <select id="layoutSelect"></select>
+    <label for="baseNoteSelect">Base Note:</label>
+    <select id="baseNoteSelect"></select>
+  </header>
+
+  <div id="perfArea"><canvas id="pluckArea"></canvas></div>
+  <div id="configArea" hidden>
+    <p>Settings here</p>
+  </div>
+
+  <script>
+  // General MIDI program names
+  const GM_PROGRAM_NAMES = [
+    "Acoustic Grand Piano","Bright Acoustic Piano","Electric Grand Piano","Honky-tonk Piano",
+    "Electric Piano 1","Electric Piano 2","Harpsichord","Clavinet",
+    "Celesta","Glockenspiel","Music Box","Vibraphone","Marimba","Xylophone","Tubular Bells","Dulcimer",
+    "Drawbar Organ","Percussive Organ","Rock Organ","Church Organ","Reed Organ","Accordion","Harmonica","Tango Accordion",
+    "Acoustic Guitar (nylon)","Acoustic Guitar (steel)","Electric Guitar (jazz)","Electric Guitar (clean)",
+    "Electric Guitar (muted)","Overdriven Guitar","Distortion Guitar","Guitar harmonics",
+    "Acoustic Bass","Electric Bass (finger)","Electric Bass (pick)","Fretless Bass","Slap Bass 1","Slap Bass 2","Synth Bass 1","Synth Bass 2",
+    "Violin","Viola","Cello","Contrabass","Tremolo Strings","Pizzicato Strings","Orchestral Harp","Timpani",
+    "String Ensemble 1","String Ensemble 2","SynthStrings 1","SynthStrings 2","Choir Aahs","Voice Oohs","Synth Voice","Orchestra Hit",
+    "Trumpet","Trombone","Tuba","Muted Trumpet","French Horn","Brass Section","SynthBrass 1","SynthBrass 2",
+    "Soprano Sax","Alto Sax","Tenor Sax","Baritone Sax","Oboe","English Horn","Bassoon","Clarinet",
+    "Piccolo","Flute","Recorder","Pan Flute","Blown Bottle","Shakuhachi","Whistle","Ocarina",
+    "Lead 1 (square)","Lead 2 (sawtooth)","Lead 3 (calliope)","Lead 4 (chiff)","Lead 5 (charang)","Lead 6 (voice)","Lead 7 (fifths)","Lead 8 (bass+lead)",
+    "Pad 1 (new age)","Pad 2 (warm)","Pad 3 (polysynth)","Pad 4 (choir)","Pad 5 (bowed)","Pad 6 (metallic)","Pad 7 (halo)","Pad 8 (sweep)",
+    "FX 1 (rain)","FX 2 (soundtrack)","FX 3 (crystal)","FX 4 (atmosphere)","FX 5 (brightness)","FX 6 (goblins)","FX 7 (echoes)","FX 8 (sci-fi)",
+    "Sitar","Banjo","Shamisen","Koto","Kalimba","Bag pipe","Fiddle","Shanai","Tinkle Bell","Agogo","Steel Drums","Woodblock","Taiko Drum","Melodic Tom","Synth Drum","Reverse Cymbal",
+    "Guitar Fret Noise","Breath Noise","Seashore","Bird Tweet","Telephone Ring","Helicopter","Applause","Gunshot"
+  ];
+
+  // Note names for base note
+  const NOTE_NAMES = ["C","C♯/D♭","D","D♯/E♭","E","F","F♯/G♭","G","G♯/A♭","A","A♯/B♭","B"];
+
+  // Scales
+  const KEYBOARD_LAYOUTS = {
+    pentatonic: [48,50,52,55,57,60,62,64,67,69,72,74,76,79,81,84],
+    minorPent:  [48,51,53,55,58,60,63,65,67,70,72,75,77,79,82,84],
+    egyptian:   [48,50,53,55,58,60,62,65,67,70,72,74,77,79,82,84],
+    inSen:      [48,49,53,55,58,60,61,65,67,70,72,73,77,79,82,84],
+    kumoi:      [48,50,51,55,56,60,62,63,67,68,72,74,75,79,80,84],
+    iwato:      [48,49,53,54,58,60,61,65,66,70,72,73,77,78,82,84],
+    wtPent:     [48,50,52,54,56,60,62,64,66,68,72,74,76,78,80,84],
+    major:      [48,50,52,53,55,57,59,60,62,64,65,67,69,71,72,74,76,77,79,81,83,84],
+    naturalMinor:[48,50,51,53,55,56,58,60,62,63,65,67,68,70,72,74,75,77,79,80,82,84],
+    wholeTone:  [48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84],
+    octatonic:  [48,49,51,52,54,55,57,58,60,61,63,64,66,67,69,70,72,73,75,76,78,79,81,82,84],
+    majorTriad: [48,52,55,60,64,67,72,76,79,84],
+    dom7:       [48,52,55,58,60,64,67,70,72,76,79,82,84],
+    maj7:       [48,52,55,59,60,64,67,71,72,76,79,83,84],
+    minorTriad:[48,51,55,60,63,67,72,75,79,84],
+    min7:      [48,51,55,58,60,63,67,70,72,75,79,82,84]
+  };
+
+  // Colors
+  const NOTE_COLORS = {
+    0:'#D62828',1:'#E76F51',2:'#F4A261',3:'#E9C46A',
+    4:'#A8DADC',5:'#2A9D8F',6:'#43AA8B',7:'#577590',
+    8:'#3A0CA3',9:'#7209B7',10:'#F72585',11:'#B5179E'
+  };
+
+  let midiAccess, currentOutput;
+  const midiOutSelect = document.getElementById('midiOutSelect');
+  const channelSelect = document.getElementById('channelSelect');
+  const programSelect = document.getElementById('programSelect');
+  const noteOffToggle = document.getElementById('noteOffToggle');
+  const layoutSelect = document.getElementById('layoutSelect');
+  const baseNoteSelect = document.getElementById('baseNoteSelect');
+  const configArea = document.getElementById('configArea');
+  const perfArea = document.getElementById('perfArea');
+  const toggleBtn = document.getElementById('toggleBtn');
+  const canvas = document.getElementById('pluckArea');
+  const ctx2 = canvas.getContext('2d');
+
+  // Populate program dropdown
+  GM_PROGRAM_NAMES.forEach((name, i) => {
+    const o = document.createElement('option');
+    o.value = i;
+    o.textContent = `${i+1} - ${name}`;
+    programSelect.appendChild(o);
+  });
+
+  // Populate base notes dropdown
+  NOTE_NAMES.forEach((note, i) => {
+    const o = document.createElement('option'); o.value = i; o.textContent = note; baseNoteSelect.appendChild(o);
+  });
+  baseNoteSelect.value = 0;
+
+  // Populate scales dropdown
+  const SCALE_NAMES = Object.keys(KEYBOARD_LAYOUTS);
+  SCALE_NAMES.forEach(name => {
+    const o = document.createElement('option'); o.value = name; o.textContent = name; layoutSelect.appendChild(o);
+  });
+  layoutSelect.value = SCALE_NAMES[0];
+
+  // MIDI init
+  navigator.requestMIDIAccess().then(ma => {
+    midiAccess = ma; midiOutSelect.innerHTML = '';
+    for (let out of midiAccess.outputs.values()) {
+      const o = document.createElement('option'); o.value = out.id; o.textContent = out.name; midiOutSelect.appendChild(o);
+    }
+    midiOutSelect.selectedIndex = 0;
+    currentOutput = midiAccess.outputs.get(midiOutSelect.value);
+
+    programSelect.addEventListener('change', () => {
+      const prog = parseInt(programSelect.value, 10);
+      const chan = parseInt(channelSelect.value, 10);
+      currentOutput.send([0xC0 | chan, prog]);
+    });
+
+    noteOffToggle.addEventListener('change', e => {
+      if (e.target.checked) {
+        const chan = parseInt(channelSelect.value, 10);
+        currentOutput.send([0xB0 | chan, 123, 0]); // All Notes Off
+      }
+    });
+  }, () => alert('MIDI not supported.'));
+
+  // UI toggle
+  toggleBtn.addEventListener('click', () => {
+    const show = configArea.hidden;
+    configArea.hidden = !show;
+    perfArea.hidden = show;
+    toggleBtn.textContent = show ? '🎹' : '⚙️';
+  });
+
+  // Layout redraw
+  let currentLayout = [];
+  function updateLayout() {
+    const base = parseInt(baseNoteSelect.value, 10);
+    currentLayout = KEYBOARD_LAYOUTS[layoutSelect.value].map(m => m + base);
+    draw();
+  }
+  function onResize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight * 0.5; draw(); }
+  window.addEventListener('resize', onResize);
+  layoutSelect.addEventListener('change', updateLayout);
+  baseNoteSelect.addEventListener('change', updateLayout);
+  updateLayout(); onResize();
+
+  // Input handling
+  const activeTouches = {};
+  function computeTouch(e) {
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const cols = currentLayout.length, wN = r.width / cols;
+    const idx = Math.min(cols - 1, Math.max(0, Math.floor(x / wN)));
+    const py = 1 - Math.max(0, Math.min(1, y / r.height));
+    return { idx, py };
+  }
+  canvas.addEventListener('pointerdown', e => {
+    canvas.setPointerCapture(e.pointerId);
+    const { idx, py } = computeTouch(e);
+    const note = currentLayout[idx];
+    const vel = Math.round(py * 127);
+    activeTouches[e.pointerId] = note;
+    currentOutput?.send([0x90 | parseInt(channelSelect.value, 10), note, vel]);
+  });
+  canvas.addEventListener('pointerup', e => {
+    const note = activeTouches[e.pointerId]; delete activeTouches[e.pointerId];
+    if (noteOffToggle.checked) currentOutput?.send([0x80 | parseInt(channelSelect.value, 10), note, 0]);
+    canvas.releasePointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointercancel', e => {
+    const note = activeTouches[e.pointerId]; delete activeTouches[e.pointerId];
+    if (noteOffToggle.checked) currentOutput?.send([0x80 | parseInt(channelSelect.value, 10), note, 0]);
+    canvas.releasePointerCapture(e.pointerId);
+  });
+
+  // Draw keys
+  function draw() {
+    const w = canvas.width, h = canvas.height, cols = currentLayout.length, wN = w / cols;
+    ctx2.clearRect(0, 0, w, h);
+    for (let i = 0; i < cols; i++) {
+      const m = currentLayout[i], hue = m % 12;
+      ctx2.fillStyle = NOTE_COLORS[hue] || '#ccc';
+      ctx2.fillRect(i * wN, 0, wN, h);
+      ctx2.strokeStyle = '#000'; ctx2.strokeRect(i * wN, 0, wN, h);
+      ctx2.fillStyle = '#000'; ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
+      ctx2.fillText(NOTE_NAMES[m % 12], i * wN + wN / 2, h / 2);
+    }
+  }
+  </script>
+</body>
+</html>
