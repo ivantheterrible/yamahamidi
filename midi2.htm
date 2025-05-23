@@ -31,7 +31,7 @@
     }
     #configArea { padding: 1em; }
   </style>
-  <!-- load VOICE_LIST as a global -->
+  <!-- voice_list.js defines window.VOICE_LIST -->
   <script src="voice_list.js"></script>
 </head>
 <body>
@@ -112,14 +112,14 @@
     const activeTouches = {};
 
     // build Channel selector
-    for (let i=0; i<16; i++) {
+    for (let i = 0; i < 16; i++) {
       const o = document.createElement('option');
-      o.value = i; o.textContent = i+1;
+      o.value = i; o.textContent = i + 1;
       channelSelect.appendChild(o);
     }
     channelSelect.value = '0';
 
-    // populate Category from VOICE_LIST
+    // populate Category dropdown
     Object.keys(window.VOICE_LIST).forEach(cat => {
       const o = document.createElement('option');
       o.value = cat; o.textContent = cat;
@@ -142,38 +142,41 @@
     // MIDI init
     navigator.requestMIDIAccess().then(ma => {
       midiAccess = ma;
-      // outputs dropdown
       midiOutSelect.innerHTML = '';
-      for (let out of midiAccess.outputs.values()) {
+      for (let out of ma.outputs.values()) {
         const o = document.createElement('option');
         o.value = out.id; o.textContent = out.name;
         midiOutSelect.appendChild(o);
       }
       if (midiOutSelect.options.length) {
         midiOutSelect.selectedIndex = 0;
-        currentOutput = midiAccess.outputs.get(midiOutSelect.value);
+        currentOutput = ma.outputs.get(midiOutSelect.value);
       }
 
       midiOutSelect.onchange = () => {
-        currentOutput = midiAccess.outputs.get(midiOutSelect.value);
+        currentOutput = ma.outputs.get(midiOutSelect.value);
         dispatchVoice();
         sendAllNotesOff(lastChannel);
       };
 
-      categorySelect.onchange = rebuildVoiceList;
-      voiceSelect.onchange    = dispatchVoice;
-      channelSelect.onchange  = () => {
+      categorySelect.onchange = () => {
+        rebuildVoiceList();
+        dispatchVoice();
+      };
+      voiceSelect.onchange   = dispatchVoice;
+      channelSelect.onchange = () => {
         sendAllNotesOff(lastChannel);
         dispatchVoice();
         lastChannel = +channelSelect.value;
       };
 
+      // initial build & send
       rebuildVoiceList();
       dispatchVoice();
 
     }).catch(_ => alert('MIDI not supported'));
 
-    // rebuild voice dropdown
+    // rebuild voice dropdown and send immediately
     function rebuildVoiceList() {
       const list = window.VOICE_LIST[categorySelect.value] || [];
       voiceSelect.innerHTML = '';
@@ -186,7 +189,7 @@
       voiceSelect.selectedIndex = 0;
     }
 
-    // send Bank+Program
+    // send Bank-Select + Program Change
     function dispatchVoice() {
       if (!currentOutput) return;
       const chan = +channelSelect.value;
@@ -209,7 +212,7 @@
       currentOutput.send([0x80|chan, note, 0]);
     }
 
-    // settings toggle
+    // Settings toggle
     toggleBtn.onclick = () => {
       const show = configArea.hidden;
       configArea.hidden = !show;
@@ -227,20 +230,20 @@
 
     function updateLayout() {
       const base = +baseNoteSelect.value;
-      currentLayout = KEYBOARD_LAYOUTS[ layoutSelect.value ].map(n => n + base);
+      currentLayout = KEYBOARD_LAYOUTS[layoutSelect.value].map(n => n + base);
       draw();
     }
 
-    // **draw() definition that was missing**
+    // draw() now defined
     function draw() {
       const w = canvas.width, h = canvas.height;
       const cols = currentLayout.length, wN = w/cols;
       ctx2.clearRect(0,0,w,h);
       currentLayout.forEach((m,i) => {
         ctx2.fillStyle   = NOTE_COLORS[m % 12] || '#ccc';
-        ctx2.fillRect(i*wN, 0, wN, h);
+        ctx2.fillRect(i*wN,0,wN,h);
         ctx2.strokeStyle = '#000';
-        ctx2.strokeRect(i*wN, 0, wN, h);
+        ctx2.strokeRect(i*wN,0,wN,h);
         ctx2.fillStyle   = '#000';
         ctx2.textAlign   = 'center';
         ctx2.textBaseline= 'middle';
@@ -248,7 +251,7 @@
       });
     }
 
-    // pointer strumming
+    // pointer-based strumming
     canvas.addEventListener('pointerdown', e => {
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
@@ -270,7 +273,7 @@
       const x = e.clientX - r.left, y = e.clientY - r.top;
       const cols = currentLayout.length, wN = r.width/cols;
       const idx = Math.min(cols-1, Math.max(0, Math.floor(x/wN)));
-      const py  = 1 - Math.max(0, Math.min(1, y/r.height));
+      const py = 1 - Math.max(0, Math.min(1, y/r.height));
       return { idx, py };
     }
 
