@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Triple MIDI Keyboards</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    h2 { margin-top: 40px; }
+    .controls { margin-bottom: 10px; }
+    .keyboard { display: flex; gap: 10px; margin-bottom: 20px; }
+    button { padding: 20px; font-size: 16px; cursor: pointer; }
+    .slider { width: 200px; margin-left: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Triple MIDI Keyboards</h1>
+
+  <div class="controls">
+    <label for="midi-out">MIDI Output:</label>
+    <select id="midi-out"></select>
+  </div>
+
+  <script>
+    let midiAccess = null;
+    let currentOutput = null;
+
+    function sendCC(channel, cc, value) {
+      if (currentOutput) {
+        currentOutput.send([0xB0 + channel, cc, value]);
+      }
+    }
+  </script>
+
+  <h2>Keyboard 1 (Channel 1)</h2>
+  <div class="controls">
+    <label for="voice1">Voice:</label>
+    <select id="voice1">
+      <option value="0">Grand Piano</option>
+      <option value="24">Nylon Guitar</option>
+      <option value="40">Violin</option>
+      <option value="56">Trumpet</option>
+      <option value="73">Flute</option>
+      <option value="80">Square Lead</option>
+      <option value="81">Saw Lead</option>
+    </select>
+    <label>Reverb Depth:</label>
+    <input type="range" id="reverb1" class="slider" min="0" max="127" value="64">
+    <label>Chorus Depth:</label>
+    <input type="range" id="chorus1" class="slider" min="0" max="127" value="64">
+    <label>Modulation:</label>
+    <input type="range" id="mod1" class="slider" min="0" max="127" value="0">
+    <label>Expression:</label>
+    <input type="range" id="expr1" class="slider" min="0" max="127" value="127">
+  </div>
+  <div class="keyboard" id="keyboard1">
+    <button data-note="60">C</button>
+    <button data-note="62">D</button>
+    <button data-note="64">E</button>
+    <button data-note="65">F</button>
+    <button data-note="67">G</button>
+  </div>
+
+  <h2>Keyboard 2 (Channel 2)</h2>
+  <div class="controls">
+    <label for="voice2">Voice:</label>
+    <select id="voice2">
+      <option value="0">Grand Piano</option>
+      <option value="24">Nylon Guitar</option>
+      <option value="40">Violin</option>
+      <option value="56">Trumpet</option>
+      <option value="73">Flute</option>
+      <option value="80">Square Lead</option>
+      <option value="81">Saw Lead</option>
+    </select>
+    <label>Reverb Depth:</label>
+    <input type="range" id="reverb2" class="slider" min="0" max="127" value="64">
+    <label>Chorus Depth:</label>
+    <input type="range" id="chorus2" class="slider" min="0" max="127" value="64">
+    <label>Modulation:</label>
+    <input type="range" id="mod2" class="slider" min="0" max="127" value="0">
+    <label>Expression:</label>
+    <input type="range" id="expr2" class="slider" min="0" max="127" value="127">
+  </div>
+  <div class="keyboard" id="keyboard2">
+    <button data-note="72">C</button>
+    <button data-note="74">D</button>
+    <button data-note="76">E</button>
+    <button data-note="77">F</button>
+    <button data-note="79">G</button>
+  </div>
+
+  <h2>Keyboard 3 (Channel 3 with Yamaha Voice Select)</h2>
+  <div class="controls">
+    <label for="voice3">Voice:</label>
+    <select id="voice3">
+      <option value="0,112,0">Grand Piano</option>
+      <option value="0,112,48">Strings</option>
+      <option value="0,112,25">Steel Guitar</option>
+      <option value="0,112,33">Fingered Bass</option>
+      <option value="0,112,82">Saw Lead</option>
+      <option value="0,112,90">Pad Warm</option>
+    </select>
+    <label>Reverb Depth:</label>
+    <input type="range" id="reverb3" class="slider" min="0" max="127" value="64">
+    <label>Chorus Depth:</label>
+    <input type="range" id="chorus3" class="slider" min="0" max="127" value="64">
+    <label>Modulation:</label>
+    <input type="range" id="mod3" class="slider" min="0" max="127" value="0">
+    <label>Expression:</label>
+    <input type="range" id="expr3" class="slider" min="0" max="127" value="127">
+  </div>
+  <div class="keyboard" id="keyboard3">
+    <button data-note="84">C</button>
+    <button data-note="86">D</button>
+    <button data-note="88">E</button>
+    <button data-note="89">F</button>
+    <button data-note="91">G</button>
+  </div>
+
+  <script>
+    navigator.requestMIDIAccess().then((access) => {
+      midiAccess = access;
+      const outputSelect = document.getElementById('midi-out');
+
+      for (const output of midiAccess.outputs.values()) {
+        const option = document.createElement('option');
+        option.value = output.id;
+        option.textContent = output.name;
+        outputSelect.appendChild(option);
+      }
+
+      outputSelect.addEventListener('change', () => {
+        currentOutput = midiAccess.outputs.get(outputSelect.value);
+      });
+
+      if (outputSelect.options.length > 0) {
+        outputSelect.selectedIndex = 0;
+        currentOutput = midiAccess.outputs.get(outputSelect.value);
+      }
+
+      document.getElementById('voice1').addEventListener('change', (e) => {
+        const program = parseInt(e.target.value, 10);
+        if (currentOutput) currentOutput.send([0xC0, program]);
+      });
+
+      document.getElementById('voice2').addEventListener('change', (e) => {
+        const program = parseInt(e.target.value, 10);
+        if (currentOutput) currentOutput.send([0xC1, program]);
+      });
+
+      document.getElementById('voice3').addEventListener('change', (e) => {
+        const [msb, lsb, program] = e.target.value.split(',').map(Number);
+        if (currentOutput) {
+          currentOutput.send([0xB2, 0x00, msb]);
+          currentOutput.send([0xB2, 0x20, lsb]);
+          currentOutput.send([0xC2, program]);
+        }
+      });
+
+      const controllers = [
+        { id: 'reverb', cc: 91 },
+        { id: 'chorus', cc: 93 },
+        { id: 'mod', cc: 1 },
+        { id: 'expr', cc: 11 }
+      ];
+
+      [0, 1, 2].forEach(channel => {
+        controllers.forEach(ctrl => {
+          const slider = document.getElementById(`${ctrl.id}${channel + 1}`);
+          slider.addEventListener('input', (e) => {
+            sendCC(channel, ctrl.cc, parseInt(e.target.value, 10));
+          });
+        });
+      });
+
+      document.getElementById('voice1').dispatchEvent(new Event('change'));
+      document.getElementById('voice2').dispatchEvent(new Event('change'));
+      document.getElementById('voice3').dispatchEvent(new Event('change'));
+    });
+
+    function sendNote(channel, note, on) {
+      if (!currentOutput) return;
+      const status = on ? 0x90 : 0x80;
+      const message = [status + channel, note, on ? 100 : 0];
+      currentOutput.send(message);
+    }
+
+    function setupKeyboard(id, channel) {
+      document.querySelectorAll(`#${id} button`).forEach((btn) => {
+        const note = parseInt(btn.dataset.note, 10);
+        btn.addEventListener('mousedown', () => sendNote(channel, note, true));
+        btn.addEventListener('mouseup', () => sendNote(channel, note, false));
+        btn.addEventListener('mouseleave', () => sendNote(channel, note, false));
+      });
+    }
+
+    setupKeyboard('keyboard1', 0);
+    setupKeyboard('keyboard2', 1);
+    setupKeyboard('keyboard3', 2);
+  </script>
+</body>
+</html>
