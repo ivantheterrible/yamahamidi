@@ -138,7 +138,7 @@
 
       // Create a GainNode for volume control
       gainNode = audioContext.createGain();
-      gainNode.gain.value = Math.pow(10, -12 / 20); // -12 dB default
+      gainNode.gain.value = Math.pow(10, -50 / 20); // -50 dB default
       gainNode.connect(audioContext.destination);
 
       // Load worklet
