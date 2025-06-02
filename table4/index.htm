@@ -143,7 +143,7 @@
 
       // Load worklet
       await audioContext.audioWorklet.addModule('textencoder.js');
-      await audioContext.audioWorklet.addModule('ToneProcessor.js');
+      await audioContext.audioWorklet.addModule('toneprocessor.js');
 
       toneNode = new AudioWorkletNode(audioContext, 'tone-processor', {
         processorOptions: { wasmModule }
