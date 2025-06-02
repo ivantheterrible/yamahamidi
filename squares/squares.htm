@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rule 30 Grid with Pentatonic Harmonics (C1 Base)</title>
+  <style>
+    body {
+      display: flex;
+      height: 100vh;
+      justify-content: center;
+      align-items: center;
+      background: #f0f0f0;
+      margin: 0;
+    }
+    #grid {
+      border-collapse: collapse;
+    }
+    #grid td {
+      width: 30px;
+      height: 30px;
+      border: 1px solid #666;
+      background-color: black;
+      cursor: pointer;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <table id="grid"></table>
+
+  <script>
+    // Number of columns: 5 notes × 5 octaves = 25
+    const COLS = 25;
+
+    // Each cell is 30px tall + 2px border (1px top + 1px bottom) = 32px total
+    const CELL_TOTAL_HEIGHT = 32;
+
+    // Rule 30: given a 3‐bit key "LCR", produce next state 0/1
+    const rule30 = {
+      '111': 0,
+      '110': 0,
+      '101': 0,
+      '100': 1,
+      '011': 1,
+      '010': 1,
+      '001': 1,
+      '000': 0
+    };
+
+    // Web Audio setup
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    /**
+     * Play a 300 ms sine‐wave beep at `frequency` Hz,
+     * with initial gain = vol (0…1). Ramp down to avoid clicks.
+     */
+    function playBeep(frequency, vol) {
+      const osc = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = frequency;
+      osc.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+      gainNode.gain.setValueAtTime(vol, now);
+      // Ramp down over 300 ms to ~0.001× to prevent a click
+      gainNode.gain.exponentialRampToValueAtTime(vol * 0.001, now + 0.3);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    }
+
+    // Pentatonic frequencies starting at C1 (32.70 Hz):
+    //   Octave 1: C1 (32.70), D1 (36.71), E1 (41.20), G1 (49.00), A1 (55.00)
+    //   Octave 2: C2 (65.41), D2 (73.42), E2 (82.41), G2 (98.00), A2 (110.00)
+    //   Octave 3: C3 (130.81), D3 (146.83), E3 (164.81), G3 (196.00), A3 (220.00)
+    //   Octave 4: C4 (261.63), D4 (293.66), E4 (329.63), G4 (392.00), A4 (440.00)
+    //   Octave 5: C5 (523.25), D5 (587.33), E5 (659.26), G5 (783.99), A5 (880.00)
+    const topFrequencies = [
+      32.70, 36.71, 41.20, 49.00, 55.00,
+      65.41, 73.42, 82.41, 98.00, 110.00,
+      130.81, 146.83, 164.81, 196.00, 220.00,
+      261.63, 293.66, 329.63, 392.00, 440.00,
+      523.25, 587.33, 659.26, 783.99, 880.00
+    ];
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // Compute how many rows fit in the viewport:
+      const viewportHeight = window.innerHeight;
+      const ROWS = Math.floor(viewportHeight / CELL_TOTAL_HEIGHT);
+
+      // Build a freqMatrix[r][c] = topFrequencies[c] × (r+1)
+      const freqMatrix = [];
+      for (let r = 0; r < ROWS; r++) {
+        freqMatrix[r] = [];
+        for (let c = 0; c < COLS; c++) {
+          freqMatrix[r][c] = topFrequencies[c] * (r + 1);
+        }
+      }
+
+      // 2D state array: 0 = off (black), 1 = on (white)
+      const state = [];
+      for (let r = 0; r < ROWS; r++) {
+        state[r] = new Array(COLS).fill(0);
+      }
+
+      // Reference the table in DOM
+      const table = document.getElementById('grid');
+
+      // Build the table: ROWS × COLS cells, all black initially
+      for (let r = 0; r < ROWS; r++) {
+        const tr = document.createElement('tr');
+        for (let c = 0; c < COLS; c++) {
+          const td = document.createElement('td');
+          td.dataset.row = r;
+          td.dataset.col = c;
+          td.style.backgroundColor = 'black';
+          td.addEventListener('click', onCellClick);
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+
+      /** 
+       * When a cell is clicked:
+       * 1. Toggle its state immediately.
+       * 2. If it turns ON, play a 300 ms beep at its frequency with volume = 1/(r+1).
+       * 3. Gradually recompute each subsequent row (r+1, r+2, …) every 300 ms, 
+       *    applying Rule 30. Whenever a cell goes from OFF → ON, play its beep 
+       *    at vol = 1/(rowIndex+1).
+       */
+      function onCellClick(e) {
+        const td = e.currentTarget;
+        const r = parseInt(td.dataset.row, 10);
+        const c = parseInt(td.dataset.col, 10);
+
+        // Toggle the clicked cell
+        const oldVal = state[r][c];
+        const newVal = oldVal === 0 ? 1 : 0;
+        state[r][c] = newVal;
+        td.style.backgroundColor = newVal ? 'white' : 'black';
+
+        // If turned ON, play beep now (volume = 1/(r+1))
+        if (newVal === 1 && oldVal === 0) {
+          const volume = 1 / (r + 1);
+          playBeep(freqMatrix[r][c], volume);
+        }
+
+        // Delay between each row update
+        const delay = 300; // ms
+
+        // Schedule updates for rows (r+1) … (ROWS-1)
+        for (let offset = 1; offset < ROWS - r; offset++) {
+          setTimeout(() => {
+            const rr = r + offset;
+            for (let cc = 0; cc < COLS; cc++) {
+              const left   = (cc > 0)        ? state[rr - 1][cc - 1] : 0;
+              const center = state[rr - 1][cc];
+              const right  = (cc < COLS - 1) ? state[rr - 1][cc + 1] : 0;
+              const key = '' + left + center + right;
+              const nextVal = rule30[key];
+
+              // If it goes OFF→ON, play beep at vol = 1/(rr+1)
+              if (nextVal === 1 && state[rr][cc] === 0) {
+                const volume = 1 / (rr + 1);
+                playBeep(freqMatrix[rr][cc], volume);
+              }
+
+              state[rr][cc] = nextVal;
+              const cell = table.rows[rr].cells[cc];
+              cell.style.backgroundColor = nextVal ? 'white' : 'black';
+            }
+          }, offset * delay);
+        }
+      }
+    });
+  </script>
+</body>
+</html>

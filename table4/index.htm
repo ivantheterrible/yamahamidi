@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Wasm Tone Generator (Bulk Voices + Volume + Random)</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 2rem;
+      max-width: 600px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .controls button {
+      flex: 1;
+      margin: 0 0.5rem;
+      font-size: 1rem;
+      padding: 0.5rem;
+      background: #007acc;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .controls button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+    #count-display {
+      font-size: 1.2rem;
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+    #status {
+      text-align: center;
+      margin-bottom: 1rem;
+      font-weight: bold;
+      color: #007acc;
+    }
+    .volume-control {
+      margin-top: 1.5rem;
+    }
+    .volume-control input[type="range"] {
+      width: 100%;
+      background: #eee;
+      height: 2rem;
+      border-radius: 10px;
+      outline: none;
+    }
+    .volume-control input[type="range"]::-webkit-slider-thumb {
+      width: 20px;
+      height: 20px;
+      background: #007acc;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+      margin-top: -9px;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .volume-control input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      background: #007acc;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+    .label {
+      margin-bottom: 0.5rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Wasm Tone Generator</h1>
+
+  <div id="status">Checking SIMD support...</div>
+
+  <div class="controls">
+    <button id="+100-btn">+100</button>
+    <button id="-100-btn" disabled>-100</button>
+  </div>
+
+  <div id="count-display">Voices playing: 0</div>
+
+  <div class="volume-control">
+    <div class="label">Volume (dB): <span id="volume-display">-12</span> dB</div>
+    <input
+      type="range"
+      id="volume-slider"
+      min="-60" max="0" step="1"
+      value="-12"
+    >
+  </div>
+
+  <script type="module">
+    import initWasm, { initSync, init as wasmInit, voice_status } from './project.js';
+
+    let audioContext = null;
+    let toneNode = null;
+    let gainNode = null;
+
+    // Track IDs of voices currently playing (not yet asked to stop)
+    const activeVoiceIds = [];
+    // Track IDs that have been asked to stop, but might still be finishing their cycle
+    const pendingStopIds = [];
+
+    async function checkSimd() {
+      const resp = await fetch('project_bg.wasm');
+      if (!resp.ok) {
+        document.getElementById('status').textContent = 'Failed to fetch WASM';
+        return null;
+      }
+      const bytes = await resp.arrayBuffer();
+      const simdSupported = WebAssembly.validate(bytes);
+      document.getElementById('status').textContent = simdSupported
+        ? 'SIMD Supported ✅'
+        : 'SIMD Not Supported ⚠️';
+      return WebAssembly.compile(bytes);
+    }
+
+    async function setupAudio() {
+      audioContext = new AudioContext();
+      await audioContext.resume();
+
+      const wasmModule = await checkSimd();
+      if (!wasmModule) throw new Error('Could not compile WASM');
+
+      // Create a GainNode for volume control
+      gainNode = audioContext.createGain();
+      gainNode.gain.value = Math.pow(10, -12 / 20); // -12 dB default
+      gainNode.connect(audioContext.destination);
+
+      // Load worklet
+      await audioContext.audioWorklet.addModule('textencoder.js');
+      await audioContext.audioWorklet.addModule('ToneProcessor.js');
+
+      toneNode = new AudioWorkletNode(audioContext, 'tone-processor', {
+        processorOptions: { wasmModule }
+      });
+      toneNode.connect(gainNode);
+
+      initSync({ module: wasmModule });
+      wasmInit(audioContext.sampleRate);
+
+      // When a voice starts, add its ID to activeVoiceIds
+      toneNode.port.onmessage = (event) => {
+        const msg = event.data;
+        if (msg.event === 'started') {
+          activeVoiceIds.push(msg.id);
+          updateCount();
+        }
+      };
+    }
+
+    function updateCount() {
+      // Total voices = actively playing + pending stops
+      const total = activeVoiceIds.length + pendingStopIds.length;
+      document.getElementById('count-display').textContent =
+        `Voices playing: ${total}`;
+      document.getElementById('-100-btn').disabled = total === 0;
+    }
+
+    // Purge any IDs in pendingStopIds whose voice_status is now null
+    async function purgeStoppedVoices() {
+      const stillPending = [];
+      for (const id of pendingStopIds) {
+        const status = voice_status(id);
+        if (status !== null) {
+          stillPending.push(id);
+        }
+      }
+      pendingStopIds.length = 0;
+      pendingStopIds.push(...stillPending);
+      updateCount();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const plusBtn = document.getElementById('+100-btn');
+      const minusBtn = document.getElementById('-100-btn');
+      const volumeSlider = document.getElementById('volume-slider');
+      const volumeDisplay = document.getElementById('volume-display');
+
+      plusBtn.addEventListener('click', async () => {
+        if (!toneNode) {
+          try {
+            await setupAudio();
+          } catch (err) {
+            console.error(err);
+            return;
+          }
+        }
+        // Start 100 random frequencies between 20 Hz and 20 kHz
+        for (let i = 0; i < 100; i++) {
+          const freq = 20 * Math.pow(10, Math.random() * 3);
+          toneNode.port.postMessage({ command: 'start', freq });
+        }
+      });
+
+      minusBtn.addEventListener('click', () => {
+        if (!toneNode) return;
+
+        // Move up to 100 IDs from activeVoiceIds to pendingStopIds
+        const toStop = activeVoiceIds.splice(0, 100);
+        pendingStopIds.push(...toStop);
+
+        // Send stop for each
+        for (const id of toStop) {
+          toneNode.port.postMessage({ command: 'stop', id });
+        }
+
+        updateCount();
+
+        // Now periodically purge any that finish their cycle
+        const checkInterval = setInterval(async () => {
+          await purgeStoppedVoices();
+          if (activeVoiceIds.length + pendingStopIds.length === 0) {
+            clearInterval(checkInterval);
+          }
+        }, 200);
+      });
+
+      volumeSlider.addEventListener('input', (e) => {
+        const db = parseFloat(e.target.value);
+        volumeDisplay.textContent = db;
+        const gain = Math.pow(10, db / 20);
+        if (gainNode) gainNode.gain.value = gain;
+      });
+    });
+  </script>
+</body>
+</html>
