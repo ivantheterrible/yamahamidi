@@ -41,7 +41,7 @@
         // 2) Load Worklet JS files
         await audioContext.audioWorklet.addModule('textencoder.js');
         console.log('TextEncoder loaded into WorkletGlobalScope');
-        await audioContext.audioWorklet.addModule('ToneProcessor.js');
+        await audioContext.audioWorklet.addModule('toneprocessor.js');
         console.log('ToneProcessor loaded into AudioWorkletGlobalScope');
 
         // 3) Pass the compiled module into the Worklet
