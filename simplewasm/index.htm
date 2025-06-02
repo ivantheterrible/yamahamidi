@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Wasm Tone Generator</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; }
+    button { font-size: 1rem; padding: 0.5rem 1rem; margin: 0.5rem; }
+    #status { margin-top: 1rem; color: #c00; }
+  </style>
+</head>
+<body>
+  <h1>Wasm Tone Generator</h1>
+  <p>
+    <label>
+      Frequency:
+      <input id="freq-input" type="number" value="440" min="20" max="20000" step="1"> Hz
+    </label>
+  </p>
+  <button id="start-btn">Start Tone</button>
+  <button id="stop-btn" disabled>Stop Tone</button>
+  <div id="status"></div>
+
+  <script type="module">
+    let toneNode, audioContext;
+
+    async function setupAudio() {
+      try {
+        audioContext = new AudioContext();
+        await audioContext.resume();
+        console.log('AudioContext resumed');
+
+        // 1) Fetch & compile the Wasm module on the main thread
+        const resp = await fetch('project_bg.wasm');
+        if (!resp.ok) throw new Error(`WASM fetch failed: ${resp.status}`);
+        const bytes = await resp.arrayBuffer();
+        const wasmModule = await WebAssembly.compile(bytes);
+        console.log('WASM module compiled');
+
+        // 2) Load Worklet JS files
+        await audioContext.audioWorklet.addModule('textencoder.js');
+        console.log('TextEncoder loaded into WorkletGlobalScope');
+        await audioContext.audioWorklet.addModule('ToneProcessor.js');
+        console.log('ToneProcessor loaded into AudioWorkletGlobalScope');
+
+        // 3) Pass the compiled module into the Worklet
+        toneNode = new AudioWorkletNode(audioContext, 'tone-processor', {
+          processorOptions: { wasmModule }
+        });
+        toneNode.connect(audioContext.destination);
+        document.getElementById('status').textContent = '';
+        return toneNode;
+
+      } catch (err) {
+        console.error('Error setting up AudioWorklet:', err);
+        document.getElementById('status').textContent =
+          '⚠️ Failed to init: ' + err.message;
+        throw err;
+      }
+    }
+
+    document.getElementById('start-btn').addEventListener('click', async () => {
+      if (!toneNode) await setupAudio();
+      const freq = parseFloat(document.getElementById('freq-input').value) || 440;
+      toneNode.port.postMessage({ command: 'start', id: 0, freq });
+      document.getElementById('start-btn').disabled = true;
+      document.getElementById('stop-btn').disabled = false;
+    });
+
+    document.getElementById('stop-btn').addEventListener('click', () => {
+      if (toneNode) toneNode.port.postMessage({ command: 'stop', id: 0 });
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('stop-btn').disabled = true;
+    });
+  </script>
+</body>
+</html>
