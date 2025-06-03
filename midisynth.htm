@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FM &amp; 303 Synth with MIDI</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 2rem;
+      text-align: center;
+    }
+    h1 {
+      margin-bottom: 0.5rem;
+    }
+    #status {
+      color: #555;
+      margin-bottom: 1rem;
+    }
+    #controls {
+      margin-bottom: 1rem;
+    }
+    select, button {
+      padding: 0.25rem;
+      font-size: 1rem;
+      margin: 0.25rem;
+    }
+    #log {
+      margin-top: 1rem;
+      padding: 0.5rem;
+      width: 80%;
+      max-width: 500px;
+      height: 120px;
+      border: 1px solid #ccc;
+      background: #f9f9f9;
+      overflow-y: auto;
+      text-align: left;
+      font-family: monospace;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>Web MIDI → Synth</h1>
+  <div id="status">Click “Enable MIDI” to get started.</div>
+
+  <div id="controls">
+    <button id="enable-midi">Enable MIDI</button>
+    <br />
+    <label for="midi-inputs">MIDI Input:</label>
+    <select id="midi-inputs" disabled>
+      <option value="">(no devices)</option>
+    </select>
+    <label for="voice-selector">Voice:</label>
+    <select id="voice-selector" disabled>
+      <option value="fm">FM Voice</option>
+      <option value="303">303 Glide Voice</option>
+    </select>
+  </div>
+
+  <p>Connect a MIDI keyboard/controller and play notes.</p>
+  <div id="log">Waiting for MIDI messages…</div>
+
+  <script>
+    // === Helpers ===
+    function midiToFreq(note) {
+      return 440 * Math.pow(2, (note - 69) / 12);
+    }
+
+    function createImpulseResponse(context, duration = 2.0, decay = 2.0) {
+      const sampleRate = context.sampleRate;
+      const length = sampleRate * duration;
+      const impulse = context.createBuffer(2, length, sampleRate);
+      for (let channel = 0; channel < 2; channel++) {
+        const buffer = impulse.getChannelData(channel);
+        for (let i = 0; i < length; i++) {
+          buffer[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+        }
+      }
+      return impulse;
+    }
+
+    // === Audio Setup ===
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Convolutional reverb for FM voices
+    const reverbNode = audioCtx.createConvolver();
+    reverbNode.buffer = createImpulseResponse(audioCtx, 2.5, 3.0);
+    reverbNode.normalize = true;
+    reverbNode.connect(audioCtx.destination);
+
+    // Short delay (slapback) for 303 voice
+    const delay303 = audioCtx.createDelay();
+    delay303.delayTime.setValueAtTime(0.15, audioCtx.currentTime); // 150 ms
+    const feedbackGain303 = audioCtx.createGain();
+    feedbackGain303.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    delay303.connect(feedbackGain303);
+    feedbackGain303.connect(delay303);
+    delay303.connect(audioCtx.destination);
+
+    // === FM Voice Management ===
+    const fmVoices = new Map();
+
+    function noteOnFM(noteNumber, velocity) {
+      const now = audioCtx.currentTime;
+      const freq = midiToFreq(noteNumber);
+
+      // Amplitude envelope
+      const ampGain = audioCtx.createGain();
+      const maxAmp = velocity / 127;
+      ampGain.gain.setValueAtTime(0.0, now);
+      ampGain.gain.linearRampToValueAtTime(maxAmp, now + 0.01);
+      ampGain.gain.linearRampToValueAtTime(maxAmp * 0.7, now + 0.2);
+
+      // FM Oscillators
+      const modOsc = audioCtx.createOscillator();
+      const modGain = audioCtx.createGain();
+      modOsc.frequency.setValueAtTime(freq * 2, now);
+      modGain.gain.setValueAtTime(100 * (velocity / 127), now);
+
+      const carOsc = audioCtx.createOscillator();
+      carOsc.frequency.setValueAtTime(freq, now);
+
+      modOsc.connect(modGain);
+      modGain.connect(carOsc.frequency);
+
+      // Swept resonant filter
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.setValueAtTime(10, now);
+      filter.frequency.setValueAtTime(freq * 2, now);
+      filter.frequency.exponentialRampToValueAtTime(freq * 0.5, now + 0.3);
+
+      // Routing: carrier → filter → amp → reverb → destination
+      carOsc.connect(filter);
+      filter.connect(ampGain);
+      ampGain.connect(reverbNode);
+
+      modOsc.start(now);
+      carOsc.start(now);
+
+      fmVoices.set(noteNumber, { modOsc, carOsc, ampGain, filter });
+    }
+
+    function noteOffFM(noteNumber) {
+      const voice = fmVoices.get(noteNumber);
+      if (!voice) return;
+      const now = audioCtx.currentTime;
+
+      voice.ampGain.gain.cancelScheduledValues(now);
+      voice.ampGain.gain.setValueAtTime(voice.ampGain.gain.value, now);
+      voice.ampGain.gain.linearRampToValueAtTime(0.0, now + 0.5);
+
+      voice.modOsc.stop(now + 0.6);
+      voice.carOsc.stop(now + 0.6);
+
+      setTimeout(() => {
+        voice.modOsc.disconnect();
+        voice.carOsc.disconnect();
+        voice.filter.disconnect();
+        voice.ampGain.disconnect();
+      }, 1000);
+
+      fmVoices.delete(noteNumber);
+    }
+
+    // === 303 Glide Voice (monophonic) ===
+    let current303 = null;
+    let last303Note = null;
+
+    function noteOn303(noteNumber, velocity) {
+      const now = audioCtx.currentTime;
+      const freq = midiToFreq(noteNumber);
+      const maxAmp = velocity / 127;
+
+      if (!current303) {
+        // Create new 303 voice
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, now);
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(freq * 2, now);
+        filter.Q.setValueAtTime(12, now);
+
+        const ampGain = audioCtx.createGain();
+        ampGain.gain.setValueAtTime(0.0, now);
+        ampGain.gain.linearRampToValueAtTime(maxAmp, now + 0.01);
+
+        // Routing: oscillator → filter → amp → (dry + delay)
+        osc.connect(filter);
+        filter.connect(ampGain);
+        ampGain.connect(audioCtx.destination);
+        ampGain.connect(delay303);
+
+        osc.start(now);
+
+        current303 = { osc, filter, ampGain };
+      } else {
+        // Glide to new frequency
+        const glideTime = 0.1;
+        current303.osc.frequency.cancelScheduledValues(now);
+        current303.osc.frequency.setValueAtTime(current303.osc.frequency.value, now);
+        current303.osc.frequency.linearRampToValueAtTime(freq, now + glideTime);
+
+        current303.filter.frequency.cancelScheduledValues(now);
+        current303.filter.frequency.setValueAtTime(current303.filter.frequency.value, now);
+        current303.filter.frequency.exponentialRampToValueAtTime(freq * 2, now + glideTime);
+
+        // Retrigger amplitude envelope quickly
+        current303.ampGain.gain.cancelScheduledValues(now);
+        current303.ampGain.gain.setValueAtTime(current303.ampGain.gain.value, now);
+        current303.ampGain.gain.linearRampToValueAtTime(maxAmp, now + 0.01);
+      }
+
+      last303Note = noteNumber;
+    }
+
+    function noteOff303(noteNumber) {
+      if (!current303 || last303Note !== noteNumber) return;
+      const now = audioCtx.currentTime;
+
+      current303.ampGain.gain.cancelScheduledValues(now);
+      current303.ampGain.gain.setValueAtTime(current303.ampGain.gain.value, now);
+      current303.ampGain.gain.linearRampToValueAtTime(0.0, now + 0.2);
+
+      current303.osc.stop(now + 0.25);
+
+      setTimeout(() => {
+        current303.osc.disconnect();
+        current303.filter.disconnect();
+        current303.ampGain.disconnect();
+        current303 = null;
+        last303Note = null;
+      }, 500);
+    }
+
+    // === MIDI Setup ===
+    let midiAccess = null;
+    let currentInput = null;
+
+    function logMessage(text) {
+      const logDiv = document.getElementById('log');
+      logDiv.textContent += text + "\n";
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('log').textContent = "";
+    }
+
+    function onMIDIMessage(event) {
+      const [status, data1, data2] = event.data;
+      const hexStatus = "0x" + status.toString(16).padStart(2, '0');
+      logMessage(`MIDI: [${hexStatus}, ${data1}, ${data2}]`);
+
+      const command = status & 0xf0;
+      const selectedVoice = document.getElementById('voice-selector').value;
+
+      if (command === 0x90 && data2 > 0) {
+        // Note On
+        if (selectedVoice === 'fm') {
+          noteOnFM(data1, data2);
+        } else if (selectedVoice === '303') {
+          noteOn303(data1, data2);
+        }
+      } else if (command === 0x80 || (command === 0x90 && data2 === 0)) {
+        // Note Off
+        if (selectedVoice === 'fm') {
+          noteOffFM(data1);
+        } else if (selectedVoice === '303') {
+          noteOff303(data1);
+        }
+      }
+    }
+
+    function populateMidiInputs() {
+      const select = document.getElementById('midi-inputs');
+      select.innerHTML = "";
+      const placeholder = document.createElement('option');
+      placeholder.value = "";
+      placeholder.textContent = "(choose an input)";
+      select.appendChild(placeholder);
+
+      for (const input of midiAccess.inputs.values()) {
+        const opt = document.createElement('option');
+        opt.value = input.id;
+        opt.textContent = input.name;
+        select.appendChild(opt);
+      }
+
+      select.disabled = false;
+      document.getElementById('voice-selector').disabled = false;
+    }
+
+    function onInputChange() {
+      const select = document.getElementById('midi-inputs');
+      const chosenId = select.value;
+
+      if (currentInput) {
+        currentInput.onmidimessage = null;
+      }
+
+      if (!chosenId) {
+        document.getElementById('status').textContent = "No MIDI input selected.";
+        return;
+      }
+
+      const newInput = midiAccess.inputs.get(chosenId);
+      if (newInput) {
+        currentInput = newInput;
+        currentInput.onmidimessage = onMIDIMessage;
+        document.getElementById('status').textContent = `Listening on: ${currentInput.name}`;
+        clearLog();
+        logMessage(`Started logging from "${currentInput.name}"`);
+      }
+    }
+
+    function requestMIDI() {
+      navigator.requestMIDIAccess()
+        .then(access => {
+          midiAccess = access;
+          if (midiAccess.inputs.size === 0) {
+            document.getElementById('status').textContent = "No MIDI inputs found.";
+            return;
+          }
+          populateMidiInputs();
+          document.getElementById('status').textContent = "Select a MIDI input above.";
+          document.getElementById('midi-inputs').addEventListener('change', onInputChange);
+          document.getElementById('enable-midi').disabled = true;
+        })
+        .catch(err => {
+          document.getElementById('status').textContent = 'MIDI Access Error';
+          console.error('Failed to get MIDI access:', err);
+        });
+    }
+
+    document.getElementById('enable-midi').addEventListener('click', () => {
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      requestMIDI();
+    });
+
+    document.addEventListener('keydown', () => {
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    });
+  </script>
+</body>
+</html>
