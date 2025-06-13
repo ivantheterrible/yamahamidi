@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chorus & Soft Clip Audio Ovals</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f0f0f0;
+      height: 100vh;
+      overflow: hidden;
+      font-family: sans-serif;
+      position: relative;
+    }
+
+    .add-button {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 24px;
+      width: 40px;
+      height: 40px;
+      background: white;
+      border: 2px solid #444;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .global-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: white;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    .global-controls label {
+      display: flex;
+      flex-direction: column;
+      font-size: 13px;
+    }
+
+    #output-scope {
+      width: 240px;
+      height: 60px;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+    }
+
+    black-oval {
+      position: absolute;
+      user-select: none;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="add-button" id="addBtn">+</div>
+
+  <div class="global-controls">
+    <label>
+      Pre-Gain
+      <input type="range" id="preGainSlider" min="0" max="10" step="0.1" value="1">
+    </label>
+    <label>
+      Distortion Type
+      <select id="distortionType">
+        <option value="soft">Soft Clip</option>
+        <option value="hard">Hard Clip</option>
+        <option value="fold">Foldback</option>
+      </select>
+    </label>
+    <label>
+      Post-Gain
+      <input type="range" id="postGainSlider" min="0" max="1" step="0.01" value="1">
+    </label>
+    <canvas id="output-scope" width="240" height="60"></canvas>
+  </div>
+
+  <black-oval style="top: 20%; left: 10%;"></black-oval>
+  <black-oval style="top: 50%; left: 40%;"></black-oval>
+  <black-oval style="bottom: 10%; right: 20%;"></black-oval>
+
+  <script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    const preGain = audioCtx.createGain();
+    const distortion = audioCtx.createWaveShaper();
+    const postGain = audioCtx.createGain();
+    const analyser = audioCtx.createAnalyser();
+
+    preGain.connect(distortion);
+    distortion.connect(postGain);
+    postGain.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    preGain.gain.value = 1;
+    postGain.gain.value = 1;
+    analyser.fftSize = 1024;
+
+    function makeDistortionCurve(type) {
+      const n = 44100;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i * 2) / n - 1;
+        switch (type) {
+          case 'soft':
+            // Linear near center, soft-knee clipping at ~±0.8
+            curve[i] = Math.tanh(2 * x); // softer tanh-style clip
+            break;
+          case 'hard':
+            curve[i] = Math.max(-0.3, Math.min(0.3, x));
+            break;
+          case 'fold':
+            curve[i] = Math.abs(x) > 0.5 ? (Math.abs(x - 1) - 0.5) : x;
+            break;
+        }
+      }
+      return curve;
+    }
+
+    distortion.curve = makeDistortionCurve('soft');
+    distortion.oversample = '4x';
+
+    document.getElementById('preGainSlider').oninput = e => {
+      preGain.gain.value = parseFloat(e.target.value);
+    };
+
+    document.getElementById('postGainSlider').oninput = e => {
+      postGain.gain.value = parseFloat(e.target.value);
+    };
+
+    document.getElementById('distortionType').onchange = e => {
+      distortion.curve = makeDistortionCurve(e.target.value);
+    };
+
+    const canvas = document.getElementById('output-scope');
+    const ctx = canvas.getContext('2d');
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function drawScope() {
+      requestAnimationFrame(drawScope);
+      analyser.getByteTimeDomainData(dataArray);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#0f0';
+      ctx.beginPath();
+      const sliceWidth = canvas.width / bufferLength;
+      let x = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * canvas.height) / 2;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.stroke();
+    }
+    drawScope();
+
+    class BlackOval extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'open' });
+
+        const container = document.createElement('div');
+        container.classList.add('oval');
+
+        const dragZone = document.createElement('div');
+        dragZone.classList.add('drag-zone');
+
+        const redDot = document.createElement('div');
+        redDot.classList.add('dot', 'red');
+
+        const greenDot = document.createElement('div');
+        greenDot.classList.add('dot', 'green');
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = 0;
+        slider.max = 1;
+        slider.step = 0.01;
+        slider.value = 0.5;
+        slider.classList.add('volume');
+
+        const modBtn = document.createElement('div');
+        modBtn.classList.add('mod-btn');
+        modBtn.textContent = '~';
+
+        const earRight = document.createElement('div');
+        earRight.classList.add('ear', 'ear-right');
+
+        const closeBtn = document.createElement('div');
+        closeBtn.classList.add('close-btn');
+        closeBtn.textContent = '×';
+
+        const earLeft = document.createElement('div');
+        earLeft.classList.add('ear', 'ear-left');
+        earLeft.title = "Toggle chorus";
+
+        earRight.appendChild(closeBtn);
+
+        container.appendChild(dragZone);
+        container.appendChild(redDot);
+        container.appendChild(greenDot);
+        container.appendChild(modBtn);
+        container.appendChild(slider);
+        container.appendChild(earRight);
+        container.appendChild(earLeft);
+
+        const style = document.createElement('style');
+        style.textContent = `
+          .oval {
+            width: 200px;
+            height: 100px;
+            background: black;
+            border-radius: 100px / 50px;
+            position: relative;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+          }
+
+          .drag-zone {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+            z-index: 0;
+          }
+
+          .dot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            position: relative;
+            z-index: 1;
+            filter: brightness(1);
+            transition: filter 0.2s;
+          }
+
+          .dot.active {
+            filter: brightness(1.5);
+          }
+
+          .red { background: red; }
+          .green { background: green; }
+
+          .volume {
+            width: 60px;
+            position: absolute;
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1;
+          }
+
+          .mod-btn {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #333;
+            color: white;
+            font-size: 16px;
+            line-height: 24px;
+            text-align: center;
+            cursor: pointer;
+            z-index: 1;
+            user-select: none;
+            filter: brightness(1);
+            transition: filter 0.2s;
+          }
+
+          .mod-btn.active {
+            filter: brightness(1.5);
+          }
+
+          .ear {
+            width: 28px;
+            height: 28px;
+            background: black;
+            border-radius: 50%;
+            position: absolute;
+            top: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+            cursor: pointer;
+          }
+
+          .ear-right {
+            right: -14px;
+          }
+
+          .ear-left {
+            left: -14px;
+          }
+
+          .ear.active {
+            filter: brightness(1.5);
+          }
+
+          .close-btn {
+            color: white;
+            font-size: 18px;
+            user-select: none;
+          }
+        `;
+
+        shadow.appendChild(style);
+        shadow.appendChild(container);
+
+        this.frequency = Math.random() * 380 + 120;
+        this.oscillator = null;
+        this.chorusOscillator = null;
+        this.gainNode = audioCtx.createGain();
+        this.gainNode.gain.value = parseFloat(slider.value);
+        this.gainNode.connect(preGain);
+
+        this.modulating = false;
+        this.modFrame = null;
+        this.modPhase = 0;
+
+        greenDot.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.startTone();
+          greenDot.classList.add('active');
+          redDot.classList.remove('active');
+        });
+
+        redDot.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.stopTone();
+          redDot.classList.add('active');
+          greenDot.classList.remove('active');
+        });
+
+        closeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.cleanupAndRemove();
+        });
+
+        earLeft.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (this.chorusOscillator) {
+            this.chorusOscillator.stop();
+            this.chorusOscillator.disconnect();
+            this.chorusOscillator = null;
+            earLeft.classList.remove('active');
+          } else {
+            this.chorusOscillator = audioCtx.createOscillator();
+            this.chorusOscillator.type = 'sine';
+            this.chorusOscillator.frequency.value = this.frequency + 2;
+            this.chorusOscillator.connect(this.gainNode);
+            this.chorusOscillator.start();
+            earLeft.classList.add('active');
+          }
+        });
+
+        slider.addEventListener('input', () => {
+          this.gainNode.gain.value = parseFloat(slider.value);
+        });
+
+        modBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.toggleModulation(modBtn, slider);
+        });
+
+        this._dragging = false;
+        this._offsetX = 0;
+        this._offsetY = 0;
+
+        dragZone.addEventListener('mousedown', (e) => {
+          this._dragging = true;
+          this._offsetX = e.clientX - this.offsetLeft;
+          this._offsetY = e.clientY - this.offsetTop;
+          dragZone.style.cursor = 'grabbing';
+        });
+
+        window.addEventListener('mousemove', (e) => {
+          if (this._dragging) {
+            this.style.left = `${e.clientX - this._offsetX}px`;
+            this.style.top = `${e.clientY - this._offsetY}px`;
+          }
+        });
+
+        window.addEventListener('mouseup', () => {
+          this._dragging = false;
+          dragZone.style.cursor = 'grab';
+        });
+      }
+
+      startTone() {
+        this.stopTone();
+        this.oscillator = audioCtx.createOscillator();
+        this.oscillator.type = 'sine';
+        this.oscillator.frequency.value = this.frequency;
+        this.oscillator.connect(this.gainNode);
+        this.oscillator.start();
+      }
+
+      stopTone() {
+        if (this.oscillator) {
+          this.oscillator.stop();
+          this.oscillator.disconnect();
+          this.oscillator = null;
+        }
+        if (this.chorusOscillator) {
+          this.chorusOscillator.stop();
+          this.chorusOscillator.disconnect();
+          this.chorusOscillator = null;
+        }
+      }
+
+      toggleModulation(btn, slider) {
+        this.modulating = !this.modulating;
+        btn.classList.toggle('active', this.modulating);
+        if (this.modulating) {
+          this.modPhase = 0;
+          const animate = () => {
+            if (!this.modulating) return;
+            const gain = 0.5 + 0.3 * Math.sin(this.modPhase);
+            this.gainNode.gain.value = gain;
+            slider.value = gain.toFixed(2);
+            this.modPhase += 0.05;
+            this.modFrame = requestAnimationFrame(animate);
+          };
+          animate();
+        } else {
+          cancelAnimationFrame(this.modFrame);
+        }
+      }
+
+      cleanupAndRemove() {
+        this.stopTone();
+        cancelAnimationFrame(this.modFrame);
+        this.gainNode.disconnect();
+        this.remove();
+      }
+    }
+
+    customElements.define('black-oval', BlackOval);
+
+    document.getElementById('addBtn').addEventListener('click', () => {
+      const oval = document.createElement('black-oval');
+      const x = Math.floor(Math.random() * (window.innerWidth - 220));
+      const y = Math.floor(Math.random() * (window.innerHeight - 120));
+      oval.style.left = `${x}px`;
+      oval.style.top = `${y}px`;
+      document.body.appendChild(oval);
+    });
+  </script>
+</body>
+</html>
