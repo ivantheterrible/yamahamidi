@@ -1,0 +1,5 @@
+cargo test --target x86_64-pc-windows-msvc --test freq_ladder_tests
+
+wasm-pack build --target web
+
+python -m http.server 8000

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chorus & Soft Clip Audio Robots</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="instructions">
+    <b>Instructions:</b> Use the frequency bar to shift all robot pitches together. Click the <b>+</b> button to add a robot. Use the eyes to start/stop sound, the left ear to toggle chorus, and the slider for volume. Adjust global gain/distortion on the right.
+  </div>
+  <div class="freq-mult-bar">
+    <label for="freqMultSlider">Frequency Multiplier</label>
+    <div class="freq-mult-slider-container">
+      <input type="range" id="freqMultSlider" min="0" max="1" step="0.001" value="0.5">
+      <div class="freq-mult-ticks">
+        <span style="left:0%">0.5×<br>-12st<br>-1 oct</span>
+        <span style="left:20.27%">0.5946×<br>-7st</span>
+        <span style="left:33.77%">0.7492×<br>-5st</span>
+        <span style="left:50%">1×<br>unison</span>
+        <span style="left:66.23%">1.3348×<br>+5st</span>
+        <span style="left:79.73%">1.6818×<br>+7st</span>
+        <span style="left:100%">2×<br>+12st<br>+1 oct</span>
+      </div>
+    </div>
+  </div>
+  <div class="add-button" id="addBtn">+</div>
+  <div class="global-controls">
+    <label>
+      Pre-Gain
+      <input type="range" id="preGainSlider" min="0" max="10" step="0.1" value="1">
+    </label>
+    <label>
+      Distortion Type
+      <select id="distortionType">
+        <option value="soft">Soft Clip</option>
+        <option value="hard">Hard Clip</option>
+        <option value="fold">Foldback</option>
+      </select>
+    </label>
+    <label>
+      Post-Gain
+      <input type="range" id="postGainSlider" min="0" max="1" step="0.01" value="1">
+    </label>
+    <canvas id="output-scope" width="240" height="60"></canvas>
+  </div>
+  <black-oval style="top: 20%; left: 10%;"></black-oval>
+  <black-oval style="top: 50%; left: 40%;"></black-oval>
+  <black-oval style="bottom: 10%; right: 20%;"></black-oval>
+  <script src="main.js"></script>
+  <script src="robot.js"></script>
+</body>
+</html>
