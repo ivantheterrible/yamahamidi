@@ -1,0 +1,71 @@
+<!-- staticpingtest.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ping Monitor (Static)</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      font-family: sans-serif;
+      background: #f0f0f0;
+    }
+    #timestamp {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <div id="timestamp">--:--:--.---</div>
+
+  <script>
+    // Connect to the /ping namespace on your Render deployment
+    const socket = io('wss://flask-render-service.onrender.com/ping', {
+      transports: ['websocket'],
+      secure: true
+    });
+    const tsEl = document.getElementById('timestamp');
+
+    // Set up Web Audio API for beep
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function beep(duration = 100, frequency = 440) {
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      gainNode.gain.value = 0.1;
+      oscillator.start();
+      setTimeout(() => oscillator.stop(), duration);
+    }
+
+    // Handle incoming pings
+    socket.on('ping', data => {
+      // data.t is seconds since epoch (floating)
+      const ms = data.t * 1000;
+      const date = new Date(ms);
+      const timeString = date.toLocaleTimeString('en-GB', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }) + '.' + String(date.getMilliseconds()).padStart(3, '0');
+      tsEl.textContent = timeString;
+      beep();
+    });
+
+    socket.on('connect_error', (err) => {
+      tsEl.textContent = 'Connection error';
+    });
+  </script>
+</body>
+</html>
