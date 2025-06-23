@@ -10,7 +10,7 @@ distortion.connect(postGain);
 postGain.connect(analyser);
 analyser.connect(audioCtx.destination);
 preGain.gain.value = 1;
-postGain.gain.value = 1;
+postGain.gain.value = 0.5;
 analyser.fftSize = 1024;
 function makeDistortionCurve(type) {
   const n = 44100;
@@ -95,6 +95,10 @@ customElements.whenDefined('black-oval').then(() => {
       // Generate random positions within the visible screen area
       left = Math.random() * (window.innerWidth - robotWidth);
       top = Math.random() * (window.innerHeight - robotHeight);
+
+      // Ensure robots stay within screen bounds
+      left = Math.max(0, Math.min(left, window.innerWidth - robotWidth));
+      top = Math.max(0, Math.min(top, window.innerHeight - robotHeight));
 
       // Check for overlap with existing robots and exclusion zones
       positionFound = !Array.from(document.querySelectorAll('black-oval')).some(existingOval => {
@@ -184,7 +188,7 @@ freqMultSlider.addEventListener('input', e => {
 // On load, set to unity
 setFreqMultiplier(1, false);
 document.getElementById('preGainSlider').value = Math.log10(preGain.gain.value / 0.01) / Math.log10(10 / 0.01) * 10;
-document.getElementById('postGainSlider').value = Math.log10(postGain.gain.value / 0.01) / Math.log10(1 / 0.01) * 1;
+document.getElementById('postGainSlider').value = 0.5;
 function adjustButtonPositions() {
   const instructionsHeight = document.querySelector('.instructions').offsetHeight;
   const freqBarHeight = document.querySelector('.freq-mult-bar').offsetHeight;
