@@ -1,16 +1,40 @@
 body {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   background: #f0f0f0;
   height: 100vh;
-  overflow: hidden;
   font-family: sans-serif;
+}
+
+.instructions {
+  flex: 0 0 auto;
+  background: #f8f8f8;
+  color: #222;
+  font-size: 15px;
+  padding: 8px 0 4px 0;
+  text-align: center;
+  z-index: 3000;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.freq-mult-bar {
+  flex: 0 0 auto;
+  background: #fff;
+  border-bottom: 1px solid #ccc;
+  z-index: 2000;
+  padding: 8px 0 20px 0;
+  text-align: center;
+}
+
+.main-content {
+  flex: 1 1 auto;
   position: relative;
-  padding-top: 160px;
 }
 
 .add-button {
   position: fixed;
-  top: 120px;
+  top: calc(8px + 4px + 15px + 1px + 20px + 8px); /* Below frequency bar */
   left: 10px;
   font-size: 24px;
   width: 40px;
@@ -27,7 +51,7 @@ body {
 
 .global-controls {
   position: fixed;
-  top: 120px;
+  top: calc(8px + 4px + 15px + 1px + 20px + 8px); /* Below frequency bar */
   right: 10px;
   background: white;
   padding: 8px;
@@ -58,37 +82,6 @@ black-oval {
   position: absolute;
   user-select: none;
   touch-action: none;
-}
-
-.instructions {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  background: #f8f8f8;
-  color: #222;
-  font-size: 15px;
-  padding: 8px 0 4px 0;
-  text-align: center;
-  z-index: 3000;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.freq-mult-bar {
-  position: fixed;
-  top: 36px;
-  left: 0;
-  width: 100vw;
-  background: #fff;
-  border-bottom: 1px solid #ccc;
-  z-index: 2000;
-  padding: 8px 0 20px 0;
-  text-align: center;
-}
-
-.freq-mult-bar label {
-  font-weight: bold;
-  margin-right: 16px;
 }
 
 .freq-mult-slider-container {

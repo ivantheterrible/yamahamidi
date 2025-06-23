@@ -185,3 +185,18 @@ freqMultSlider.addEventListener('input', e => {
 setFreqMultiplier(1, false);
 document.getElementById('preGainSlider').value = Math.log10(preGain.gain.value / 0.01) / Math.log10(10 / 0.01) * 10;
 document.getElementById('postGainSlider').value = Math.log10(postGain.gain.value / 0.01) / Math.log10(1 / 0.01) * 1;
+function adjustButtonPositions() {
+  const instructionsHeight = document.querySelector('.instructions').offsetHeight;
+  const freqBarHeight = document.querySelector('.freq-mult-bar').offsetHeight;
+
+  const addButton = document.querySelector('.add-button');
+  const globalControls = document.querySelector('.global-controls');
+
+  const newTop = instructionsHeight + freqBarHeight + 8; // Add some spacing
+
+  addButton.style.top = `${newTop}px`;
+  globalControls.style.top = `${newTop}px`;
+}
+
+window.addEventListener('resize', adjustButtonPositions);
+window.addEventListener('load', adjustButtonPositions);
