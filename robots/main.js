@@ -75,25 +75,57 @@ function drawScope() {
 drawScope();
 customElements.whenDefined('black-oval').then(() => {
   document.getElementById('addBtn').addEventListener('click', () => {
-        const OvalClass = customElements.get('black-oval');
-    const oval = new OvalClass();      // ← no string parsing here
+    const OvalClass = customElements.get('black-oval');
+    const oval = new OvalClass();
 
-    // Place robots in a grid, closer together
-    if (!window._robotGrid) {
-      window._robotGrid = { x: 60, y: 180, col: 0, row: 0 };
+    const robotWidth = 60; // Approximate width of the robot
+    const robotHeight = 120; // Approximate height of the robot
+    const maxAttempts = 100; // Maximum attempts to find a non-overlapping position
+
+    const exclusionZones = [
+      document.querySelector('.freq-mult-bar').getBoundingClientRect(),
+      document.querySelector('.global-controls').getBoundingClientRect()
+    ];
+
+    let positionFound = false;
+    let attempts = 0;
+    let left, top;
+
+    while (!positionFound && attempts < maxAttempts) {
+      // Generate random positions within the visible screen area
+      left = Math.random() * (window.innerWidth - robotWidth);
+      top = Math.random() * (window.innerHeight - robotHeight);
+
+      // Check for overlap with existing robots and exclusion zones
+      positionFound = !Array.from(document.querySelectorAll('black-oval')).some(existingOval => {
+        const rect = existingOval.getBoundingClientRect();
+        return (
+          left < rect.right &&
+          left + robotWidth > rect.left &&
+          top < rect.bottom &&
+          top + robotHeight > rect.top
+        );
+      }) && !exclusionZones.some(zone => {
+        return (
+          left < zone.right &&
+          left + robotWidth > zone.left &&
+          top < zone.bottom &&
+          top + robotHeight > zone.top
+        );
+      });
+
+      attempts++;
     }
-    const grid = window._robotGrid;
-    const gridSpacingX = 60; // closer horizontal spacing
-    const gridSpacingY = 120; // vertical spacing
-    const maxCols = Math.floor((window.innerWidth - 100) / gridSpacingX);
-    oval.style.left = `${grid.x + grid.col * gridSpacingX}px`;
-    oval.style.top = `${grid.y + grid.row * gridSpacingY}px`;
-    grid.col++;
-    if (grid.col >= maxCols) {
-      grid.col = 0;
-      grid.row++;
+
+    if (positionFound) {
+      // Set the position of the new robot
+      oval.style.position = 'absolute';
+      oval.style.left = `${left}px`;
+      oval.style.top = `${top}px`;
+      document.body.appendChild(oval);
+    } else {
+      console.warn('Could not find a non-overlapping position for the new robot.');
     }
-    document.body.appendChild(oval);
   });
 });
 // Frequency multiplier logic
