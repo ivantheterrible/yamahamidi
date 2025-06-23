@@ -73,24 +73,28 @@ function drawScope() {
   ctx.stroke();
 }
 drawScope();
-document.getElementById('addBtn').addEventListener('click', () => {
-  const oval = document.createElement('black-oval');
-  // Place robots in a grid, closer together
-  if (!window._robotGrid) {
-    window._robotGrid = { x: 60, y: 180, col: 0, row: 0 };
-  }
-  const grid = window._robotGrid;
-  const gridSpacingX = 60; // closer horizontal spacing
-  const gridSpacingY = 120; // vertical spacing
-  const maxCols = Math.floor((window.innerWidth - 100) / gridSpacingX);
-  oval.style.left = `${grid.x + grid.col * gridSpacingX}px`;
-  oval.style.top = `${grid.y + grid.row * gridSpacingY}px`;
-  grid.col++;
-  if (grid.col >= maxCols) {
-    grid.col = 0;
-    grid.row++;
-  }
-  document.body.appendChild(oval);
+customElements.whenDefined('black-oval').then(() => {
+  document.getElementById('addBtn').addEventListener('click', () => {
+        const OvalClass = customElements.get('black-oval');
+    const oval = new OvalClass();      // ← no string parsing here
+
+    // Place robots in a grid, closer together
+    if (!window._robotGrid) {
+      window._robotGrid = { x: 60, y: 180, col: 0, row: 0 };
+    }
+    const grid = window._robotGrid;
+    const gridSpacingX = 60; // closer horizontal spacing
+    const gridSpacingY = 120; // vertical spacing
+    const maxCols = Math.floor((window.innerWidth - 100) / gridSpacingX);
+    oval.style.left = `${grid.x + grid.col * gridSpacingX}px`;
+    oval.style.top = `${grid.y + grid.row * gridSpacingY}px`;
+    grid.col++;
+    if (grid.col >= maxCols) {
+      grid.col = 0;
+      grid.row++;
+    }
+    document.body.appendChild(oval);
+  });
 });
 // Frequency multiplier logic
 window.freqMultiplier = 1;

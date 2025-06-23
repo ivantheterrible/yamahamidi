@@ -286,6 +286,9 @@ class BlackOval extends HTMLElement {
     // Set initial state: both eyes dark
     redDot.classList.add('active');
     greenDot.classList.remove('active');
+    if (!window.audioCtx) {
+      throw new Error('Audio context is not initialized. Ensure main.js is loaded before robot.js.');
+    }
   }
   // Add method to handle global frequency multiplier changes
   setGlobalFreqMultiplier(mult, animate = true) {
