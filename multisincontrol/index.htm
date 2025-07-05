@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <title>32-Harmonic Additive Synth with LFO Control</title>
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      font-family: sans-serif;
+    }
+    input[type="range"] {
+      accent-color: #fff;
+    }
+    label, span {
+      color: #fff;
+    }
+    button {
+      background: #222;
+      color: #fff;
+      border: 1px solid #444;
+      padding: 0.5em 1em;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: filter 0.2s;
+    }
+    #start.pulse {
+      animation: pulse-glow 1.5s infinite;
+    }
+    @keyframes pulse-glow {
+      0% { filter: brightness(1.0); }
+      50% { filter: brightness(1.5); }
+      100% { filter: brightness(1.0); }
+    }
+    button:hover {
+      background: #333;
+    }
+    #equationControls > div {
+      border: 1px solid #333;
+      margin: 8px 0;
+      padding: 8px;
+      border-radius: 6px;
+    }
+    .eq-disabled {
+      opacity: 1;
+    }
+    .eq-disabled input[type="range"],
+    .eq-disabled param-slider,
+    .eq-disabled .harmonic-graph {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+    .harmonic-graph {
+      width: 160px;
+      height: 40px;
+      background: #181818;
+      border: 1px solid #0fa;
+      border-radius: 3px;
+      margin-top: 4px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+  <div style="margin-bottom:1.2em; background:#181818; border:1px solid #0fa; border-radius:6px; padding:1em 1.5em; max-width:700px;">
+    <b>About this additive noise generator:</b><br>
+    The unmodified source sound is a sum of the first 32 harmonics, all at full strength—resulting in an abrasive buzzy tone. The modifiers below progressively shape the strengths of each harmonic. Some of the modifier parameters are modulated by their own LFO. <br>
+    <span style="color:#ffb;">Note:</span> The sound can be a bit clicky and crunchy, especially when parameters change abruptly, because there is no smoothing or gradation on volume changes (and also perhaps because JavaScript just naturally sounds a bit crunchy). If it seems distorted, try adjusting the overall volume slider. <br>
+  </div>
+
+  <button id="start" class="pulse">Start</button>
+  <button id="stop">Stop</button>
+  <label for="oscFreq">Base Oscillator Frequency: <span id="oscFreqValue">45</span> Hz</label>
+  <input type="range" id="oscFreq" min="20" max="80" step="1" value="45" style="width:200px;">
+  <label for="overallVolume" style="margin-left:2em;">Overall Volume: <span id="overallVolumeValue">0.27x</span></label>
+  <input type="range" id="overallVolume" min="0" max="2" step="0.01" value="0.27" style="width:150px;">
+  <br>
+  <div id="equationControls"></div>
+  <br>
+
+  <script type="module">
+    import { modulationEquationClasses } from './modulationEquations.js';
+
+    let context = null;
+    let lfoNode = null;
+    let oscNodes = [];
+    let baseFreq = 55;
+    const numHarmonics = 32;
+    let running = false;
+
+    // --- MODEL ---
+    // Holds all equation control state (enabled, params, LFOs, makeupGain)
+    const equationControlModel = {};
+    // Initialize model from modulationEquationClasses
+    modulationEquationClasses.forEach(EqClass => {
+      const eqId = EqClass.id;
+      // Enable Offset Sine and PWM by default
+      let enabled = false;
+      if (EqClass.label && (EqClass.label.toLowerCase().includes('sine') || EqClass.label.toLowerCase().includes('pwm'))) {
+        enabled = true;
+      }
+      equationControlModel[eqId] = {
+        enabled,
+        params: {},
+        lfo: {},
+        makeupGain: typeof EqClass.makeupGainDefault === 'number' ? EqClass.makeupGainDefault : 0
+      };
+      EqClass.params.forEach(param => {
+        equationControlModel[eqId].params[param.name] = param.defaultValue;
+        if (param.showLfo) {
+          equationControlModel[eqId].lfo[param.name] = {
+            freq: param.lfoFreqInitialValue !== undefined ? param.lfoFreqInitialValue : (param.lfoFreqMin || 0.01),
+            depth: param.lfoDepthInitialValue !== undefined ? param.lfoDepthInitialValue : (param.lfoDepthMin || 0)
+          };
+        }
+      });
+    });
+
+    // --- CONTROLLER/VIEWMODEL HELPERS ---
+    function getSelectedEqIdxs() {
+      return modulationEquationClasses.map((EqClass, idx) => equationControlModel[EqClass.id].enabled ? idx : null).filter(idx => idx !== null);
+    }
+
+    function getAllEquationsAndParams() {
+      const idxs = getSelectedEqIdxs();
+      const eqBodies = [];
+      const paramsArr = [];
+      idxs.forEach(idx => {
+        const EqClass = modulationEquationClasses[idx];
+        const eqId = EqClass.id;
+        const fnStr = EqClass.prototype.evaluate.toString();
+        const body = fnStr.substring(fnStr.indexOf('{') + 1, fnStr.lastIndexOf('}'));
+        eqBodies.push(body);
+        const params = { _id: eqId, _label: EqClass.label };
+        EqClass.params.forEach(p => {
+          params[p.name] = equationControlModel[eqId].params[p.name];
+          if (p.showLfo) {
+            params[`${p.name}_lfoFreq`] = equationControlModel[eqId].lfo[p.name].freq;
+            params[`${p.name}_lfoDepth`] = equationControlModel[eqId].lfo[p.name].depth;
+          }
+        });
+        paramsArr.push(params);
+      });
+      return { eqBodies, paramsArr, idxs };
+    }
+
+    // Render all equation controls: checkbox + all controls for each equation, always visible
+    // Render all equation controls ONCE at startup
+    function renderEquationControls() {
+      const eqDiv = document.getElementById('equationControls');
+      eqDiv.innerHTML = '';
+      modulationEquationClasses.forEach((EqClass, idx) => {
+        const eqId = EqClass.id;
+        const eqContainer = document.createElement('div');
+        eqContainer.id = `eq_container_${eqId}`;
+        eqContainer.style.border = '1px solid #333';
+        eqContainer.style.margin = '8px 0';
+        eqContainer.style.padding = '8px';
+        eqContainer.style.borderRadius = '6px';
+        // Checkbox and label only
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = idx;
+        checkbox.id = `eq_enable_${eqId}`;
+        checkbox.checked = equationControlModel[eqId].enabled;
+        checkbox.addEventListener('change', () => {
+          equationControlModel[eqId].enabled = checkbox.checked;
+          updateAllEquationsAndParams();
+        });
+        const label = document.createElement('label');
+        label.htmlFor = checkbox.id;
+        label.textContent = EqClass.label;
+        eqContainer.appendChild(checkbox);
+        eqContainer.appendChild(label);
+        // Add equation description
+        const desc = document.createElement('div');
+        desc.style.fontSize = '0.95em';
+        desc.style.color = '#9ff';
+        desc.style.margin = '2px 0 6px 24px';
+        desc.textContent = EqClass.description || '';
+        eqContainer.appendChild(desc);
+        eqContainer.appendChild(document.createElement('br'));
+
+        // --- Harmonic Graph Canvas (per equation) ---
+        const harmonicGraph = document.createElement('canvas');
+        harmonicGraph.width = 160;
+        harmonicGraph.height = 40;
+        harmonicGraph.className = 'harmonic-graph';
+        harmonicGraph.id = `harmonicGraph_${eqId}`;
+        eqContainer.appendChild(harmonicGraph);
+
+        // Attach animation logic to canvas
+        let harmonicState = new Array(32).fill(0);
+        function drawHarmonicGraph() {
+          const ctx = harmonicGraph.getContext('2d');
+          ctx.clearRect(0, 0, harmonicGraph.width, harmonicGraph.height);
+          const N = 32;
+          const barW = Math.floor(harmonicGraph.width / N);
+          const midY = Math.floor(harmonicGraph.height / 2);
+          const maxAbs = Math.max(1, ...harmonicState.map(v => Math.abs(v) || 0));
+          for (let i = 0; i < N; i++) {
+            const amp = harmonicState[i] || 0;
+            // Scale so that -1..+1 fills the graph vertically
+            const h = Math.round((amp / maxAbs) * (harmonicGraph.height / 2 - 2));
+            ctx.fillStyle = amp >= 0 ? '#0fa' : '#f55';
+            if (h >= 0) {
+              ctx.fillRect(i * barW + 1, midY - h, barW - 2, h);
+            } else {
+              ctx.fillRect(i * barW + 1, midY, barW - 2, -h);
+            }
+          }
+          // Draw center axis
+          ctx.strokeStyle = '#333';
+          ctx.beginPath();
+          ctx.moveTo(0, midY + 0.5);
+          ctx.lineTo(harmonicGraph.width, midY + 0.5);
+          ctx.stroke();
+        }
+        function animate() {
+          drawHarmonicGraph();
+          harmonicGraph._animFrame = requestAnimationFrame(animate);
+        }
+        harmonicGraph._setHarmonicState = (state) => {
+          harmonicState = Array.isArray(state) ? state.slice() : new Array(32).fill(0);
+        };
+        animate();
+
+        // Parameter sliders (always visible)
+        EqClass.params.forEach(param => {
+          if (param.name && param.name.startsWith('global_')) return; // Skip global params
+          const paramSlider = document.createElement('param-slider');
+          paramSlider.setAttribute('label', param.label);
+          paramSlider.setAttribute('min', param.min !== undefined ? param.min : 0.01);
+          paramSlider.setAttribute('max', param.max !== undefined ? param.max : 0.99);
+          paramSlider.setAttribute('step', param.step !== undefined ? param.step : 0.01);
+          paramSlider.setAttribute('value', equationControlModel[eqId].params[param.name]);
+          paramSlider.setAttribute('name', param.name);
+          paramSlider.setAttribute('id', `param_${eqId}_${param.name}`);
+          paramSlider.setAttribute('eq-id', eqId);
+          // LFO UI attributes if present
+          if (param.showLfo) {
+            paramSlider.setAttribute('show-lfo', '');
+            if (typeof param.lfoFreqMin !== 'undefined') paramSlider.setAttribute('lfo-freq-min', param.lfoFreqMin);
+            if (typeof param.lfoFreqMax !== 'undefined') paramSlider.setAttribute('lfo-freq-max', param.lfoFreqMax);
+            if (typeof param.lfoDepthMin !== 'undefined') paramSlider.setAttribute('lfo-depth-min', param.lfoDepthMin);
+            if (typeof param.lfoDepthMax !== 'undefined') paramSlider.setAttribute('lfo-depth-max', param.lfoDepthMax);
+            // Set initial values for LFO controls
+            paramSlider.setAttribute('lfo-freq-initial-value', equationControlModel[eqId].lfo[param.name].freq);
+            paramSlider.setAttribute('lfo-depth-initial-value', equationControlModel[eqId].lfo[param.name].depth);
+          }
+          paramSlider.disabled = !equationControlModel[eqId].enabled;
+          paramSlider.addEventListener('param-change', (e) => {
+            equationControlModel[eqId].params[param.name] = parseFloat(e.detail.value);
+            if (lfoNode) {
+              lfoNode.port.postMessage({ type: 'setParam', param: param.name, value: parseFloat(e.detail.value) });
+            }
+          });
+          paramSlider.addEventListener('lfo-param-change', (e) => {
+            if (param.showLfo) {
+              if (e.detail.lfoType === 'rate') equationControlModel[eqId].lfo[param.name].freq = e.detail.value;
+              if (e.detail.lfoType === 'depth') equationControlModel[eqId].lfo[param.name].depth = e.detail.value;
+              if (lfoNode) {
+                lfoNode.port.postMessage({ type: 'setLfoParam', eqId: eqId, param: param.name, lfoType: e.detail.lfoType, value: e.detail.value });
+              }
+            }
+          });
+          eqContainer.appendChild(paramSlider);
+          eqContainer.appendChild(document.createElement('br'));
+        });
+        // Make-up gain slider (always visible)
+        const mgSlider = document.createElement('param-slider');
+        mgSlider.setAttribute('label', `${EqClass.label} Make-up Gain`);
+        mgSlider.setAttribute('min', -2);
+        mgSlider.setAttribute('max', 2);
+        mgSlider.setAttribute('step', 0.01);
+        mgSlider.setAttribute('value', equationControlModel[eqId].makeupGain);
+        mgSlider.setAttribute('name', `makeupGain_${eqId}`);
+        mgSlider.setAttribute('id', `makeupGain_${eqId}`);
+        mgSlider.setAttribute('display-format', 'gain');
+        mgSlider.disabled = !equationControlModel[eqId].enabled;
+        mgSlider.addEventListener('param-change', (e) => {
+          equationControlModel[eqId].makeupGain = parseFloat(e.detail.value);
+          const gain = Math.pow(10, parseFloat(e.detail.value));
+          if (lfoNode) {
+            lfoNode.port.postMessage({ type: 'setMakeupGain', eqId, value: gain });
+          }
+        });
+        eqContainer.appendChild(mgSlider);
+        eqContainer.appendChild(document.createElement('br'));
+        eqDiv.appendChild(eqContainer);
+      });
+    }
+
+    // Only update enabled state and send params, do not rerender controls
+    function updateAllEquationsAndParams() {
+      // Show/hide or enable/disable controls for each equation
+      modulationEquationClasses.forEach((EqClass, idx) => {
+        const eqId = EqClass.id;
+        const container = document.getElementById(`eq_container_${eqId}`);
+        if (container) {
+          container.classList.toggle('eq-disabled', !equationControlModel[eqId].enabled);
+        }
+        // Enable/disable all sliders in this container
+        EqClass.params.forEach(param => {
+          const slider = document.getElementById(`param_${eqId}_${param.name}`);
+          if (slider) slider.disabled = !equationControlModel[eqId].enabled;
+        });
+        const mgSlider = document.getElementById(`makeupGain_${eqId}`);
+        if (mgSlider) mgSlider.disabled = !equationControlModel[eqId].enabled;
+      });
+      if (lfoNode) {
+        const { eqBodies, paramsArr } = getAllEquationsAndParams();
+        lfoNode.port.postMessage({ type: 'setEquation', equation: eqBodies, paramsArr });
+        // Send current make-up gain for each enabled equation
+        paramsArr.forEach((params, i) => {
+          const eqId = params._id;
+          const gain = Math.pow(10, equationControlModel[eqId].makeupGain);
+          lfoNode.port.postMessage({ type: 'setMakeupGain', eqId, value: gain });
+        });
+      }
+    }
+
+    // Add this near the top of the <script type="module"> section
+    class ParamSlider extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this._lfoValue = 0;
+        this._animationFrame = null;
+        // Removed: this._harmonicState, this._harmonicAnimationFrame
+      }
+      connectedCallback() {
+        const label = this.getAttribute('label') || '';
+        const min = this.getAttribute('min') || '0.01';
+        const max = this.getAttribute('max') || '0.99';
+        const step = this.getAttribute('step') || '0.01';
+        const value = this.getAttribute('value') || min;
+        const name = this.getAttribute('name') || '';
+        const displayFormat = this.getAttribute('display-format') || 'default';
+        // LFO attributes
+        const showLfo = this.hasAttribute('show-lfo');
+        const lfoFreqMin = this.getAttribute('lfo-freq-min') || '0.01';
+        const lfoFreqMax = this.getAttribute('lfo-freq-max') || '10';
+        const lfoDepthMin = this.getAttribute('lfo-depth-min') || '0';
+        const lfoDepthMax = this.getAttribute('lfo-depth-max') || '1';
+        // Initial values for LFO
+        const lfoFreqInitial = this.getAttribute('lfo-freq-initial-value');
+        const lfoDepthInitial = this.getAttribute('lfo-depth-initial-value');
+        const lfoFreqVal = (lfoFreqInitial !== null && lfoFreqInitial !== undefined) ? lfoFreqInitial : lfoFreqMin;
+        const lfoDepthVal = (lfoDepthInitial !== null && lfoDepthInitial !== undefined) ? lfoDepthInitial : lfoDepthMin;
+        this.shadowRoot.innerHTML = `
+          <style>
+            label, span { color: #fff; }
+            input[type=range] { width: 200px; }
+            .lfo-controls { margin-left: 1em; font-size: 0.95em; color: #ccc; border: 1px solid #0ff; background: #223; padding: 0.5em; border-radius: 4px; display: inline-block; }
+            .lfo-controls label { color: #ccc; }
+          </style>
+          <label>
+            ${label}: <span id="val"></span>
+            <input type="range" min="${min}" max="${max}" step="${step}" value="${value}" name="${name}">
+          </label>
+          ${showLfo ? `
+            <span class="lfo-controls">
+              <label>LFO Rate: <input type="range" min="${lfoFreqMin}" max="${lfoFreqMax}" step="0.01" value="${lfoFreqVal}" id="lfoRate"></label>
+              <span id="lfoRateVal">${lfoFreqVal}</span> Hz
+              <label style="margin-left:1em;">LFO Depth: <input type="range" min="${lfoDepthMin}" max="${lfoDepthMax}" step="0.01" value="${lfoDepthVal}" id="lfoDepth"></label>
+              <span id="lfoDepthVal">${lfoDepthVal}</span>
+              <canvas id="lfoValueCanvas" width="40" height="20" style="vertical-align:middle"></canvas>
+            </span>
+          ` : ''}
+        `;
+        if (showLfo) {
+          // Dispatch lfo-param-change event on LFO slider changes, including eqId
+          const eqId = this.getAttribute('eq-id');
+          const lfoRate = this.shadowRoot.getElementById('lfoRate');
+          const lfoDepth = this.shadowRoot.getElementById('lfoDepth');
+          lfoRate && lfoRate.addEventListener('input', () => {
+            this.dispatchEvent(new CustomEvent('lfo-param-change', {
+              detail: { eqId, param: name, lfoType: 'rate', value: parseFloat(lfoRate.value) }, bubbles: true
+            }));
+            this.shadowRoot.getElementById('lfoRateVal').textContent = lfoRate.value;
+          });
+          lfoDepth && lfoDepth.addEventListener('input', () => {
+            this.dispatchEvent(new CustomEvent('lfo-param-change', {
+              detail: { eqId, param: name, lfoType: 'depth', value: parseFloat(lfoDepth.value) }, bubbles: true
+            }));
+            this.shadowRoot.getElementById('lfoDepthVal').textContent = lfoDepth.value;
+          });
+        }
+        const input = this.shadowRoot.querySelector('input[type=range][name]');
+        const valSpan = this.shadowRoot.getElementById('val');
+        // Helper to format value
+        const updateValueDisplay = (v) => {
+          if (displayFormat === 'gain') {
+            valSpan.textContent = Math.pow(10, parseFloat(v)).toFixed(2);
+          } else {
+            valSpan.textContent = v;
+          }
+        };
+        input.addEventListener('input', () => {
+          updateValueDisplay(input.value);
+          this.dispatchEvent(new CustomEvent('param-change', { detail: { value: input.value } }));
+        });
+        // Initial value display
+        updateValueDisplay(value);
+        this._startLfoAnimation();
+        // (No harmonic animation in param-slider)
+      }
+      disconnectedCallback() {
+        if (this._animationFrame) cancelAnimationFrame(this._animationFrame);
+      }
+      get value() {
+        return this.shadowRoot.querySelector('input[type=range][name]').value;
+      }
+      set value(val) {
+        this.shadowRoot.querySelector('input[type=range][name]').value = val;
+        this.shadowRoot.getElementById('val').textContent = val;
+      }
+      setLfoValue(val) {
+        this._lfoValue = val;
+      }
+      _startLfoAnimation() {
+        // Get max LFO depth from attribute (default 1)
+        const lfoDepthMax = parseFloat(this.getAttribute('lfo-depth-max')) || 1;
+        const animate = () => {
+          const canvas = this.shadowRoot.getElementById('lfoValueCanvas');
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Map value (-max..+max) to canvas width (centered at 20, range -18..+18)
+            let max = lfoDepthMax;
+            if (!isFinite(max) || max <= 0) max = 1;
+            let v = Math.max(-max, Math.min(max, this._lfoValue));
+            const x = 20 + 18 * (v / max);
+            ctx.beginPath();
+            ctx.arc(x, 10, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#0af';
+            ctx.fill();
+            // Draw LFO value as text, right-aligned
+            ctx.font = '10px monospace';
+            ctx.fillStyle = '#0af';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'top';
+            ctx.fillText((typeof this._lfoValue === 'number' ? this._lfoValue.toFixed(3) : ''), canvas.width - 2, 1);
+          }
+          this._animationFrame = requestAnimationFrame(animate);
+        };
+        this._animationFrame = requestAnimationFrame(animate);
+      }
+    }
+    customElements.define('param-slider', ParamSlider);
+
+    // --- Harmonic State UI Update Handler (per equation) ---
+    function updateHarmonicDisplays(harmonicStates) {
+      for (const eqId in harmonicStates) {
+        const graph = document.getElementById(`harmonicGraph_${eqId}`);
+        if (graph && graph._setHarmonicState) {
+          graph._setHarmonicState(harmonicStates[eqId]);
+        }
+      }
+    }
+
+
+    // --- LFO Value UI Update Handler ---
+    function updateLfoDisplays(lfoValues) {
+      for (const eqId in lfoValues) {
+        for (const param in lfoValues[eqId]) {
+          // Find the param-slider for this eqId/param
+          const slider = document.getElementById(`param_${eqId}_${param}`);
+          if (slider && typeof slider.setLfoValue === 'function') {
+            slider.setLfoValue(lfoValues[eqId][param]);
+          }
+        }
+      }
+    }
+
+    renderEquationControls();
+    updateAllEquationsAndParams();
+
+    // Ensure overall volume is sent to processor on start and slider change
+    const overallVolumeSlider = document.getElementById('overallVolume');
+    const overallVolumeSpan = document.getElementById('overallVolumeValue');
+    overallVolumeSlider.addEventListener('input', () => {
+      overallVolumeSpan.textContent = parseFloat(overallVolumeSlider.value).toFixed(2) + 'x';
+      if (lfoNode) {
+        lfoNode.port.postMessage({ type: 'setOverallVolume', value: parseFloat(overallVolumeSlider.value) });
+      }
+    });
+
+    document.getElementById('start').onclick = async () => {
+      if (context) return; // Prevent double init
+      // Remove pulse effect
+      document.getElementById('start').classList.remove('pulse');
+      context = new AudioContext();
+      baseFreq = parseFloat(document.getElementById('oscFreq').value);
+      await context.audioWorklet.addModule('cyclicModulationProcessor.js');
+      lfoNode = new AudioWorkletNode(context, 'cyclic-modulation-processor', {
+        outputChannelCount: new Array(numHarmonics).fill(1),
+        numberOfOutputs: numHarmonics
+      });
+      lfoNode.port.onmessage = (event) => {
+        if (event.data && event.data.type === 'debug') {
+          console.log('[Processor debug]', event.data);
+        }
+        if (event.data && event.data.type === 'lfoValues') {
+          updateLfoDisplays(event.data.lfoValues);
+        }
+        if (event.data && event.data.type === 'harmonicStates') {
+          updateHarmonicDisplays(event.data.harmonicStates);
+        }
+      };
+      // Gather all parameter values for all enabled equations
+      const { eqBodies, paramsArr } = getAllEquationsAndParams();
+      lfoNode.port.postMessage({ type: 'setEquation', equation: eqBodies, paramsArr });
+      // Send initial global base frequency
+      lfoNode.port.postMessage({
+        type: 'setGlobalParam',
+        param: 'global_baseFrequency',
+        value: baseFreq
+      });
+      // Send current make-up gain for each enabled equation
+      paramsArr.forEach((params, i) => {
+        const eqId = params._id;
+        const mgInput = document.getElementById(`makeupGain_${eqId}`);
+        if (mgInput) {
+          const gain = Math.pow(10, parseFloat(mgInput.value));
+          lfoNode.port.postMessage({ type: 'setMakeupGain', eqId, value: gain });
+        }
+        // Send initial LFO values for each LFO-enabled parameter
+        const EqClass = modulationEquationClasses.find(eq => eq.id === eqId);
+        if (EqClass) {
+          EqClass.params.forEach(param => {
+            if (param.showLfo) {
+              const slider = document.getElementById(`param_${eqId}_${param.name}`);
+              // Try to get initial values from param definition, else from slider, else fallback
+              let lfoFreq = (typeof param.lfoFreqInitialValue !== 'undefined') ? param.lfoFreqInitialValue : (slider && slider.getAttribute('lfo-freq-initial-value'));
+              let lfoDepth = (typeof param.lfoDepthInitialValue !== 'undefined') ? param.lfoDepthInitialValue : (slider && slider.getAttribute('lfo-depth-initial-value'));
+              // If not found, fallback to min
+              if (typeof lfoFreq === 'undefined' || lfoFreq === null) lfoFreq = param.lfoFreqMin || 0.01;
+              if (typeof lfoDepth === 'undefined' || lfoDepth === null) lfoDepth = param.lfoDepthMin || 0;
+              lfoNode.port.postMessage({ type: 'setLfoParam', param: param.name, lfoType: 'rate', value: parseFloat(lfoFreq) });
+              lfoNode.port.postMessage({ type: 'setLfoParam', param: param.name, lfoType: 'depth', value: parseFloat(lfoDepth) });
+            }
+          });
+        }
+      });
+      // Send current overall volume
+      const overallVolumeSlider = document.getElementById('overallVolume');
+      lfoNode.port.postMessage({ type: 'setOverallVolume', value: parseFloat(overallVolumeSlider.value) });
+
+      const masterGain = context.createGain();
+      masterGain.gain.value = 0.05;
+      masterGain.connect(context.destination);
+
+      oscNodes = [];
+      for (let i = 0; i < numHarmonics; i++) {
+        const osc = context.createOscillator();
+        osc.frequency.value = baseFreq * (i + 1);
+
+        const gain = context.createGain();
+        gain.gain.value = 0;
+
+        lfoNode.connect(gain.gain, i);
+        osc.connect(gain).connect(masterGain);
+
+        osc.start();
+        oscNodes.push(osc);
+      }
+
+      context.resume();
+      running = true;
+    };
+
+    document.getElementById('stop').onclick = () => {
+      if (context) {
+        context.close();
+        context = null;
+        lfoNode = null;
+        oscNodes = [];
+        running = false;
+      }
+    };
+
+    // Oscillator base frequency slider event
+    const oscFreqSlider = document.getElementById('oscFreq');
+    const oscFreqValue = document.getElementById('oscFreqValue');
+    oscFreqSlider.addEventListener('input', () => {
+      oscFreqValue.textContent = oscFreqSlider.value;
+      baseFreq = parseFloat(oscFreqSlider.value);
+      // Update all oscillator frequencies if started
+      if (oscNodes.length > 0) {
+        for (let i = 0; i < oscNodes.length; i++) {
+          oscNodes[i].frequency.setValueAtTime(baseFreq * (i + 1), context.currentTime);
+        }
+      }
+      // Send base frequency to processor as a global param
+      if (lfoNode && lfoNode.port) {
+        lfoNode.port.postMessage({
+          type: 'setGlobalParam',
+          param: 'global_baseFrequency',
+          value: baseFreq
+        });
+      }
+    });
+  </script>
+</body>
+</html>
