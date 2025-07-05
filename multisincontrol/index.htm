@@ -61,12 +61,19 @@
       padding: 1em 1.5em;
       width: 100vw;
       max-width: 100vw;
+      min-width: 0;
       box-sizing: border-box;
+      left: 50%;
+      right: 0;
+      position: relative;
+      transform: translateX(-50%);
     }
     @media (min-width: 800px) {
       .about-box {
         max-width: 700px;
         width: 100%;
+        left: unset;
+        transform: none;
       }
     }
     .eq-disabled {
@@ -78,19 +85,44 @@
       opacity: 0.5;
       pointer-events: none;
     }
-    /* Larger checkboxes and labels */
+    /* Responsive checkboxes and labels */
     input[type="checkbox"] {
-      width: 2em;
-      height: 2em;
       accent-color: #0fa;
       vertical-align: middle;
       margin-right: 0.5em;
+      width: 1.2em;
+      height: 1.2em;
     }
     label[for^="eq_enable_"] {
-      font-size: 1.5em;
+      font-size: 1.1em;
       vertical-align: middle;
       margin-right: 1em;
       cursor: pointer;
+    }
+    @media (max-width: 700px) {
+      input[type="checkbox"] {
+        width: 2.5em;
+        height: 2.5em;
+      }
+      label[for^="eq_enable_"] {
+        font-size: 2em;
+      }
+    }
+    /* Bigger base frequency and volume sliders */
+    #oscFreq, #overallVolume {
+      height: 2.5em;
+      width: 90vw;
+      max-width: 500px;
+      margin: 0.5em 0 1em 0;
+      accent-color: #0fa;
+      touch-action: pan-x;
+    }
+    @media (min-width: 700px) {
+      #oscFreq, #overallVolume {
+        height: 1.5em;
+        width: 350px;
+        max-width: 500px;
+      }
     }
     .harmonic-graph {
       width: 320px;
