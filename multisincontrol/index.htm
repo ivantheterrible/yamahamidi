@@ -20,18 +20,28 @@
       background: #222;
       color: #fff;
       border: 1px solid #444;
-      padding: 0.5em 1em;
-      border-radius: 4px;
+      padding: 1em 2.5em;
+      border-radius: 8px;
       cursor: pointer;
       transition: filter 0.2s;
+      font-size: 2.2em;
+      margin: 0.5em 0.5em 0.5em 0;
+      min-width: 120px;
+      min-height: 60px;
+      box-shadow: 0 2px 12px #0008;
     }
     #start.pulse {
-      animation: pulse-glow 1.5s infinite;
+      animation: pulse-glow 1s infinite, pulse-color 2s infinite;
     }
     @keyframes pulse-glow {
       0% { filter: brightness(1.0); }
-      50% { filter: brightness(1.5); }
+      50% { filter: brightness(2.2); }
       100% { filter: brightness(1.0); }
+    }
+    @keyframes pulse-color {
+      0% { box-shadow: 0 0 16px 4px #0fa, 0 2px 12px #0008; }
+      50% { box-shadow: 0 0 32px 12px #ff0, 0 2px 12px #0008; }
+      100% { box-shadow: 0 0 16px 4px #0fa, 0 2px 12px #0008; }
     }
     button:hover {
       background: #333;
@@ -42,6 +52,23 @@
       padding: 8px;
       border-radius: 6px;
     }
+    /* Responsive About Box */
+    .about-box {
+      margin-bottom: 1.2em;
+      background: #181818;
+      border: 1px solid #0fa;
+      border-radius: 6px;
+      padding: 1em 1.5em;
+      width: 100vw;
+      max-width: 100vw;
+      box-sizing: border-box;
+    }
+    @media (min-width: 800px) {
+      .about-box {
+        max-width: 700px;
+        width: 100%;
+      }
+    }
     .eq-disabled {
       opacity: 1;
     }
@@ -51,20 +78,42 @@
       opacity: 0.5;
       pointer-events: none;
     }
+    /* Larger checkboxes and labels */
+    input[type="checkbox"] {
+      width: 2em;
+      height: 2em;
+      accent-color: #0fa;
+      vertical-align: middle;
+      margin-right: 0.5em;
+    }
+    label[for^="eq_enable_"] {
+      font-size: 1.5em;
+      vertical-align: middle;
+      margin-right: 1em;
+      cursor: pointer;
+    }
     .harmonic-graph {
-      width: 160px;
-      height: 40px;
+      width: 320px;
+      height: 80px;
       background: #181818;
       border: 1px solid #0fa;
       border-radius: 3px;
-      margin-top: 4px;
+      margin-top: 8px;
       display: block;
+      max-width: 98vw;
+    }
+    @media (max-width: 600px) {
+      .harmonic-graph {
+        width: 98vw;
+        height: 120px;
+        max-width: 98vw;
+      }
     }
   </style>
 </head>
 <body>
 
-  <div style="margin-bottom:1.2em; background:#181818; border:1px solid #0fa; border-radius:6px; padding:1em 1.5em; max-width:700px;">
+  <div class="about-box">
     <b>About this additive noise generator:</b><br>
     The unmodified source sound is a sum of the first 32 harmonics, all at full strength—resulting in an abrasive buzzy tone. The modifiers below progressively shape the strengths of each harmonic. Some of the modifier parameters are modulated by their own LFO. <br>
     <span style="color:#ffb;">Note:</span> The sound can be a bit clicky and crunchy, especially when parameters change abruptly, because there is no smoothing or gradation on volume changes (and also perhaps because JavaScript just naturally sounds a bit crunchy). If it seems distorted, try adjusting the overall volume slider. <br>
@@ -185,8 +234,14 @@
 
         // --- Harmonic Graph Canvas (per equation) ---
         const harmonicGraph = document.createElement('canvas');
-        harmonicGraph.width = 160;
-        harmonicGraph.height = 40;
+        // Responsive canvas size
+        if (window.innerWidth < 700) {
+          harmonicGraph.width = Math.min(window.innerWidth * 0.98, 600);
+          harmonicGraph.height = 120;
+        } else {
+          harmonicGraph.width = 320;
+          harmonicGraph.height = 80;
+        }
         harmonicGraph.className = 'harmonic-graph';
         harmonicGraph.id = `harmonicGraph_${eqId}`;
         eqContainer.appendChild(harmonicGraph);
