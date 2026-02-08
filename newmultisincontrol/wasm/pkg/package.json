@@ -1,0 +1,15 @@
+{
+  "name": "sin_wave_renderer_wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "sin_wave_renderer_wasm_bg.wasm",
+    "sin_wave_renderer_wasm.js",
+    "sin_wave_renderer_wasm.d.ts"
+  ],
+  "main": "sin_wave_renderer_wasm.js",
+  "types": "sin_wave_renderer_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
