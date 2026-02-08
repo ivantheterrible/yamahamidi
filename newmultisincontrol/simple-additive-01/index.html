@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Additive Synth</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    h1 {
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    .subtitle {
+      color: #888;
+      margin-bottom: 24px;
+    }
+    .control-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    input[type="range"] {
+      flex: 1;
+      height: 8px;
+      -webkit-appearance: none;
+      background: #333;
+      border-radius: 4px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      background: #4a9eff;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      background: #4a9eff;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+    .value-display {
+      min-width: 70px;
+      text-align: right;
+      font-family: monospace;
+      color: #4a9eff;
+    }
+    button {
+      padding: 12px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #toggleBtn {
+      background: #4a9eff;
+      color: white;
+    }
+    #toggleBtn:hover {
+      background: #3a8eef;
+    }
+    #toggleBtn.running {
+      background: #e74c3c;
+    }
+    #toggleBtn.running:hover {
+      background: #c0392b;
+    }
+    #toggleBtn:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      background: #252540;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    .status-label {
+      color: #888;
+    }
+    .status-value {
+      color: #4a9eff;
+    }
+    .controls {
+      opacity: 0.5;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+    .controls.enabled {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    
+    /* Modulator Sections */
+    .modulator-section {
+      margin-top: 24px;
+      padding: 16px;
+      background: #252540;
+      border-radius: 6px;
+      border-left: 4px solid #4a9eff;
+    }
+    .modulator-section.random {
+      border-left-color: #f39c12;
+    }
+    .modulator-section.combined {
+      border-left-color: #2ecc71;
+    }
+    .modulator-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .modulator-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .toggle-btn {
+      padding: 6px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 4px;
+      background: #4a9eff;
+      color: white;
+    }
+    .toggle-btn.off {
+      background: #555;
+      color: #999;
+    }
+    .toggle-btn:hover {
+      opacity: 0.9;
+    }
+    .modulator-controls {
+      margin-bottom: 12px;
+    }
+    .modulator-controls.disabled {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    
+    /* Visualization */
+    .visualizer-label {
+      color: #888;
+      font-size: 11px;
+      margin-bottom: 6px;
+    }
+    .bars-wrapper {
+      position: relative;
+      height: 80px;
+    }
+    .bars-container {
+      display: flex;
+      align-items: center;
+      height: 100%;
+      gap: 2px;
+      position: relative;
+    }
+    .zero-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 1px;
+      background: #444;
+    }
+    .bar {
+      flex: 1;
+      min-width: 4px;
+      position: absolute;
+      left: 0;
+      width: calc((100% - 62px) / 32);
+      border-radius: 2px;
+      transition: height 0.05s ease-out, top 0.05s ease-out;
+    }
+    /* LFO bars - blue/purple */
+    .bars-lfo .bar {
+      background: linear-gradient(to top, #4a9eff, #9b59b6);
+    }
+    .bars-lfo .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Random bars - orange/yellow */
+    .bars-random .bar {
+      background: linear-gradient(to top, #f39c12, #e67e22);
+    }
+    .bars-random .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Combined bars - green */
+    .bars-combined .bar {
+      background: linear-gradient(to top, #2ecc71, #27ae60);
+    }
+    .bars-combined .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Lowpass bars - cyan */
+    .bars-lowpass .bar {
+      background: linear-gradient(to top, #00bcd4, #0097a7);
+    }
+    .bars-lowpass .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Highpass bars - magenta */
+    .bars-highpass .bar {
+      background: linear-gradient(to top, #e91e63, #c2185b);
+    }
+    .bars-highpass .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Comb bars - lime */
+    .bars-comb .bar {
+      background: linear-gradient(to top, #cddc39, #afb42b);
+    }
+    .bars-comb .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    .modulator-section.lowpass {
+      border-left-color: #00bcd4;
+    }
+    .modulator-section.highpass {
+      border-left-color: #e91e63;
+    }
+    .modulator-section.comb {
+      border-left-color: #cddc39;
+    }
+    .modulator-section.pwm {
+      border-left-color: #ff5722;
+    }
+    .modulator-section.wavefolder {
+      border-left-color: #9c27b0;
+    }
+    .modulator-section.barberpole {
+      border-left-color: #00e676;
+    }
+    .modulator-section.falling {
+      border-left-color: #ff4081;
+    }
+    .modulator-section.vowel {
+      border-left-color: #ffc107;
+    }
+    .modulator-section.keyboard {
+      border-left-color: #03a9f4;
+    }
+    /* PWM bars - deep orange */
+    .bars-pwm .bar {
+      background: linear-gradient(to top, #ff5722, #e64a19);
+    }
+    .bars-pwm .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Wavefolder bars - purple */
+    .bars-wavefolder .bar {
+      background: linear-gradient(to top, #9c27b0, #7b1fa2);
+    }
+    .bars-wavefolder .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Barber Pole bars - bright green */
+    .bars-barberpole .bar {
+      background: linear-gradient(to top, #00e676, #00c853);
+    }
+    .bars-barberpole .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Falling bars - pink */
+    .bars-falling .bar {
+      background: linear-gradient(to top, #ff4081, #f50057);
+    }
+    .bars-falling .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Vowel bars - amber/gold */
+    .bars-vowel .bar {
+      background: linear-gradient(to top, #ffc107, #ff8f00);
+    }
+    .bars-vowel .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    /* Keyboard bars - light blue */
+    .bars-keyboard .bar {
+      background: linear-gradient(to top, #03a9f4, #0288d1);
+    }
+    .bars-keyboard .bar.negative {
+      background: linear-gradient(to bottom, #e74c3c, #c0392b);
+    }
+    .description {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 12px;
+      font-style: italic;
+    }
+    .midi-info {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 12px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    .midi-info .label {
+      color: #888;
+    }
+    .midi-info .value {
+      color: #03a9f4;
+    }
+    .midi-note-display {
+      font-size: 24px;
+      font-weight: bold;
+      color: #03a9f4;
+    }
+  </style>
+</head>
+<body>
+  <h1>Simple Additive Synth</h1>
+  <p class="subtitle">32-partial harmonic series with stackable modulators</p>
+  
+  <button id="toggleBtn">Start Audio</button>
+  
+  <div class="control-group" style="margin-top: 20px;">
+    <label>Master Volume (post-render)</label>
+    <div class="slider-row">
+      <input type="range" id="masterVolume" min="0" max="1" value="0.5" step="0.01">
+      <span class="value-display" id="masterVolumeValue">50%</span>
+    </div>
+  </div>
+  
+  <div class="controls" id="controls">
+    <div class="control-group">
+      <label>Base Frequency</label>
+      <div class="slider-row">
+        <input type="range" id="baseFreq" min="5" max="440" value="110" step="1">
+        <span class="value-display" id="baseFreqValue">110 Hz</span>
+      </div>
+    </div>
+    
+    <!-- LFO Modulator Section -->
+    <div class="modulator-section">
+      <div class="modulator-header">
+        <span class="modulator-title">LFO Modulator (Sine Wave)</span>
+        <button class="toggle-btn" id="lfoToggle">ON</button>
+      </div>
+      <p class="description">Creates a moving sine pattern across the harmonics. Each partial has a phase offset for animation effects.</p>
+      <div class="modulator-controls" id="lfoControls">
+        <div class="control-group">
+          <label>LFO Rate</label>
+          <div class="slider-row">
+            <input type="range" id="lfoRate" min="0.1" max="10" value="1" step="0.1">
+            <span class="value-display" id="lfoRateValue">1.0 Hz</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>LFO Amount (modulation depth)</label>
+          <div class="slider-row">
+            <input type="range" id="lfoAmount" min="0" max="1" value="0.5" step="0.01">
+            <span class="value-display" id="lfoAmountValue">0.50</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>LFO Offset (center amplitude)</label>
+          <div class="slider-row">
+            <input type="range" id="lfoOffset" min="-1" max="1" value="0" step="0.01">
+            <span class="value-display" id="lfoOffsetValue">0.00</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">LFO Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-lfo" id="barsLfo"></div>
+      </div>
+    </div>
+    
+    <!-- Random Step Modulator Section -->
+    <div class="modulator-section random">
+      <div class="modulator-header">
+        <span class="modulator-title">Random Step Modulator</span>
+        <button class="toggle-btn" id="randomToggle">ON</button>
+      </div>
+      <p class="description">Randomizes each harmonic independently for evolving spectra. Probability controls change rate.</p>
+      <div class="modulator-controls" id="randomControls">
+        <div class="control-group">
+          <label>Change Rate (changes per second)</label>
+          <div class="slider-row">
+            <input type="range" id="randomRate" min="0.1" max="20" value="2" step="0.1">
+            <span class="value-display" id="randomRateValue">2.0 /s</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Random Values (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-random" id="barsRandom"></div>
+      </div>
+    </div>
+    
+    <!-- Lowpass Filter Modulator Section -->
+    <div class="modulator-section lowpass">
+      <div class="modulator-header">
+        <span class="modulator-title">Lowpass Filter</span>
+        <button class="toggle-btn off" id="lowpassToggle">OFF</button>
+      </div>
+      <p class="description">A resonant lowpass filter. Cutoff, slope, and resonance shape the harmonic rolloff.</p>
+      <div class="modulator-controls disabled" id="lowpassControls">
+        <div class="control-group">
+          <label>Cutoff Harmonic</label>
+          <div class="slider-row">
+            <input type="range" id="lowpassCutoff" min="1" max="32" value="10" step="0.1">
+            <span class="value-display" id="lowpassCutoffValue">10.0</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Slope</label>
+          <div class="slider-row">
+            <input type="range" id="lowpassSlope" min="0.5" max="6" value="2" step="0.1">
+            <span class="value-display" id="lowpassSlopeValue">2.0</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Resonance</label>
+          <div class="slider-row">
+            <input type="range" id="lowpassResonance" min="0" max="2" value="0.5" step="0.01">
+            <span class="value-display" id="lowpassResonanceValue">0.50</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Lowpass Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-lowpass" id="barsLowpass"></div>
+      </div>
+    </div>
+    
+    <!-- Highpass Filter Modulator Section -->
+    <div class="modulator-section highpass">
+      <div class="modulator-header">
+        <span class="modulator-title">Highpass Filter</span>
+        <button class="toggle-btn off" id="highpassToggle">OFF</button>
+      </div>
+      <p class="description">A resonant highpass filter. Higher harmonics pass through while lower ones are attenuated.</p>
+      <div class="modulator-controls disabled" id="highpassControls">
+        <div class="control-group">
+          <label>Cutoff Harmonic</label>
+          <div class="slider-row">
+            <input type="range" id="highpassCutoff" min="1" max="32" value="8" step="0.1">
+            <span class="value-display" id="highpassCutoffValue">8.0</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Slope</label>
+          <div class="slider-row">
+            <input type="range" id="highpassSlope" min="0.5" max="6" value="2" step="0.1">
+            <span class="value-display" id="highpassSlopeValue">2.0</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Resonance</label>
+          <div class="slider-row">
+            <input type="range" id="highpassResonance" min="0" max="2" value="0.5" step="0.01">
+            <span class="value-display" id="highpassResonanceValue">0.50</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Highpass Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-highpass" id="barsHighpass"></div>
+      </div>
+    </div>
+    
+    <!-- Harmonic Comb Modulator Section -->
+    <div class="modulator-section comb">
+      <div class="modulator-header">
+        <span class="modulator-title">Harmonic Comb</span>
+        <button class="toggle-btn off" id="combToggle">OFF</button>
+      </div>
+      <p class="description">Creates a comb filter effect in the harmonic spectrum. Spacing and phase control the notches/peaks.</p>
+      <div class="modulator-controls disabled" id="combControls">
+        <div class="control-group">
+          <label>Comb Spacing</label>
+          <div class="slider-row">
+            <input type="range" id="combSpacing" min="1" max="16" value="4" step="0.1">
+            <span class="value-display" id="combSpacingValue">4.0</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Comb Phase</label>
+          <div class="slider-row">
+            <input type="range" id="combPhase" min="0" max="6.283" value="0" step="0.01">
+            <span class="value-display" id="combPhaseValue">0.00</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Comb Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-comb" id="barsComb"></div>
+      </div>
+    </div>
+    
+    <!-- PWM Modulator Section -->
+    <div class="modulator-section pwm">
+      <div class="modulator-header">
+        <span class="modulator-title">PWM (Pulse Width Modulation)</span>
+        <button class="toggle-btn off" id="pwmToggle">OFF</button>
+      </div>
+      <p class="description">Simulates the harmonic structure of a pulse wave. Adjust duty cycle for thin to full sounds.</p>
+      <div class="modulator-controls disabled" id="pwmControls">
+        <div class="control-group">
+          <label>Duty Cycle</label>
+          <div class="slider-row">
+            <input type="range" id="pwmDuty" min="0.01" max="0.99" value="0.32" step="0.01">
+            <span class="value-display" id="pwmDutyValue">0.32</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">PWM Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-pwm" id="barsPwm"></div>
+      </div>
+    </div>
+    
+    <!-- Wavefolder Modulator Section -->
+    <div class="modulator-section wavefolder">
+      <div class="modulator-header">
+        <span class="modulator-title">Wavefolder</span>
+        <button class="toggle-btn off" id="wavefolderToggle">OFF</button>
+      </div>
+      <p class="description">Simulates analog wavefolder circuits for rich, complex harmonics. Higher fold values create more harmonic complexity.</p>
+      <div class="modulator-controls disabled" id="wavefolderControls">
+        <div class="control-group">
+          <label>Fold Amount</label>
+          <div class="slider-row">
+            <input type="range" id="wavefolderFold" min="1" max="10" value="2.5" step="0.1">
+            <span class="value-display" id="wavefolderFoldValue">2.5</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Asymmetry</label>
+          <div class="slider-row">
+            <input type="range" id="wavefolderAsymmetry" min="-1" max="1" value="0" step="0.01">
+            <span class="value-display" id="wavefolderAsymmetryValue">0.00</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Wavefolder Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-wavefolder" id="barsWavefolder"></div>
+      </div>
+    </div>
+    
+    <!-- Barber Pole Modulator Section -->
+    <div class="modulator-section barberpole">
+      <div class="modulator-header">
+        <span class="modulator-title">Barber Pole Harmonics</span>
+        <button class="toggle-btn off" id="barberPoleToggle">OFF</button>
+      </div>
+      <p class="description">Creates a continuously rising or falling harmonic pattern (barber pole illusion). Density sets stripe spacing; speed controls direction and rate.</p>
+      <div class="modulator-controls disabled" id="barberPoleControls">
+        <div class="control-group">
+          <label>Stripe Spacing (Density)</label>
+          <div class="slider-row">
+            <input type="range" id="barberPoleDensity" min="1" max="16" value="6" step="0.1">
+            <span class="value-display" id="barberPoleDensityValue">6.0</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Rise/Fall Speed</label>
+          <div class="slider-row">
+            <input type="range" id="barberPoleSpeed" min="-20" max="20" value="3" step="0.1">
+            <span class="value-display" id="barberPoleSpeedValue">3.0</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Stripe Q (Sharpness)</label>
+          <div class="slider-row">
+            <input type="range" id="barberPoleQ" min="0.1" max="32" value="2" step="0.1">
+            <span class="value-display" id="barberPoleQValue">2.0</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Barber Pole Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-barberpole" id="barsBarberPole"></div>
+      </div>
+    </div>
+    
+    <!-- Falling Harmonics Modulator Section -->
+    <div class="modulator-section falling">
+      <div class="modulator-header">
+        <span class="modulator-title">Falling Harmonics</span>
+        <button class="toggle-btn off" id="fallingToggle">OFF</button>
+      </div>
+      <p class="description">Harmonics 'fall' from 32 to 1, stacking up. When the stack is full, it resets. Probability controls fall speed.</p>
+      <div class="modulator-controls disabled" id="fallingControls">
+        <div class="control-group">
+          <label>Fall Probability</label>
+          <div class="slider-row">
+            <input type="range" id="fallingProbability" min="0.01" max="1" value="0.1" step="0.01">
+            <span class="value-display" id="fallingProbabilityValue">0.10</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Falling Harmonics Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-falling" id="barsFalling"></div>
+      </div>
+    </div>
+    
+    <!-- Vowel Morph Modulator Section -->
+    <div class="modulator-section vowel">
+      <div class="modulator-header">
+        <span class="modulator-title">Vowel Morph</span>
+        <button class="toggle-btn off" id="vowelToggle">OFF</button>
+      </div>
+      <p class="description">Morphs between vowel sounds (A, E, I, O, U) using real formant data. Tracks the base oscillator frequency.</p>
+      <div class="modulator-controls disabled" id="vowelControls">
+        <div class="control-group">
+          <label>Vowel Morph (A → E → I → O → U)</label>
+          <div class="slider-row">
+            <input type="range" id="vowelMorph" min="0" max="1" value="0.5" step="0.01">
+            <span class="value-display" id="vowelMorphValue">0.50</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Formant Q (Sharpness)</label>
+          <div class="slider-row">
+            <input type="range" id="vowelQ" min="2" max="50" value="12" step="0.1">
+            <span class="value-display" id="vowelQValue">12.0</span>
+          </div>
+        </div>
+      </div>
+      <div class="visualizer-label">Vowel Morph Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-vowel" id="barsVowel"></div>
+      </div>
+    </div>
+    
+    <!-- Keyboard Modulator Section -->
+    <div class="modulator-section keyboard">
+      <div class="modulator-header">
+        <span class="modulator-title">Keyboard (MIDI)</span>
+        <span class="midi-note-display" id="midiNote">--</span>
+      </div>
+      <p class="description">MIDI keyboard control. Pitch ratio multiplies base frequency; gate controls amplitude. Auto-enables when MIDI device connects.</p>
+      <div class="midi-info">
+        <span><span class="label">Status:</span> <span class="value" id="midiStatus">Waiting for audio...</span></span>
+      </div>
+      <div class="visualizer-label">Keyboard Gate Output (per partial)</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-keyboard" id="barsKeyboard"></div>
+      </div>
+    </div>
+    
+    <!-- Combined Output Section -->
+    <div class="modulator-section combined">
+      <div class="modulator-header">
+        <span class="modulator-title">Combined Output (All Modulators)</span>
+      </div>
+      <p class="description">Product of all enabled modulators. This is the final amplitude sent to the renderer for each partial.</p>
+      <div class="visualizer-label">Final amplitude sent to renderer</div>
+      <div class="bars-wrapper">
+        <div class="zero-line"></div>
+        <div class="bars-container bars-combined" id="barsCombined"></div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="status">
+    <span class="status-label">Status:</span>
+    <span class="status-value" id="status">Ready to start</span>
+  </div>
+  
+  <script type="module" src="main.js"></script>
+</body>
+</html>
