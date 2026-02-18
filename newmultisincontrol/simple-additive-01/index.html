@@ -318,16 +318,61 @@
     }
     .midi-info {
       display: flex;
-      gap: 24px;
+      flex-direction: column;
+      gap: 8px;
       margin-bottom: 12px;
       font-family: monospace;
       font-size: 13px;
+    }
+    .midi-status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .midi-controls-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .midi-controls-row label {
+      color: #888;
+      margin-bottom: 0;
+      font-weight: normal;
+    }
+    .midi-controls-row select {
+      background: #1a1a2e;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-family: monospace;
+      font-size: 12px;
+      cursor: pointer;
+      min-width: 120px;
+    }
+    .midi-controls-row select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .midi-controls-row select:focus {
+      outline: none;
+      border-color: #03a9f4;
     }
     .midi-info .label {
       color: #888;
     }
     .midi-info .value {
       color: #03a9f4;
+    }
+    .midi-info .value.error {
+      color: #e74c3c;
+    }
+    .midi-info .value.warning {
+      color: #f39c12;
+    }
+    .midi-info .value.success {
+      color: #2ecc71;
     }
     .midi-note-display {
       font-size: 24px;
@@ -674,7 +719,36 @@
       </div>
       <p class="description">MIDI keyboard control. Pitch ratio multiplies base frequency; gate controls amplitude. Auto-enables when MIDI device connects.</p>
       <div class="midi-info">
-        <span><span class="label">Status:</span> <span class="value" id="midiStatus">Waiting for audio...</span></span>
+        <div class="midi-status-row">
+          <span class="label">MIDI Access:</span>
+          <span class="value warning" id="midiAccessStatus">Start audio first</span>
+        </div>
+        <div class="midi-controls-row">
+          <label for="midiDeviceSelect">Device:</label>
+          <select id="midiDeviceSelect" disabled>
+            <option value="all">All devices</option>
+          </select>
+          <label for="midiChannelSelect">Channel:</label>
+          <select id="midiChannelSelect" disabled>
+            <option value="all">All</option>
+            <option value="0">1</option>
+            <option value="1">2</option>
+            <option value="2">3</option>
+            <option value="3">4</option>
+            <option value="4">5</option>
+            <option value="5">6</option>
+            <option value="6">7</option>
+            <option value="7">8</option>
+            <option value="8">9</option>
+            <option value="9">10</option>
+            <option value="10">11</option>
+            <option value="11">12</option>
+            <option value="12">13</option>
+            <option value="13">14</option>
+            <option value="14">15</option>
+            <option value="15">16</option>
+          </select>
+        </div>
       </div>
       <div class="visualizer-label">Keyboard Gate Output (per partial)</div>
       <div class="bars-wrapper">

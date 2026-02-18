@@ -10,6 +10,8 @@ let isRunning = false;
 let midiAccess = null;
 let midiNoteStack = [];
 let midiConnected = false;
+let selectedMidiInputId = 'all'; // 'all' or specific device ID
+let selectedMidiChannel = 'all'; // 'all' or 0-15
 const BASE_NOTE = 69; // A4 = 440Hz reference
 
 const toggleBtn = document.getElementById('toggleBtn');
@@ -34,6 +36,12 @@ function noteToPitchRatio(note) {
 function handleMidiMessage(event) {
   const [status, note, velocity] = event.data;
   const command = status & 0xf0;
+  const channel = status & 0x0f;
+  
+  // Filter by selected channel (unless "all" is selected)
+  if (selectedMidiChannel !== 'all' && channel !== parseInt(selectedMidiChannel)) {
+    return;
+  }
   
   if (command === 0x90 && velocity > 0) {
     // Note on - add to stack
@@ -47,7 +55,6 @@ function handleMidiMessage(event) {
 }
 
 function updateFromMidi() {
-  const midiStatusEl = document.getElementById('midiStatus');
   const midiNoteEl = document.getElementById('midiNote');
   
   if (midiNoteStack.length > 0) {
@@ -72,53 +79,130 @@ function updateFromMidi() {
 }
 
 async function initMidi() {
-  const midiStatusEl = document.getElementById('midiStatus');
+  const midiAccessStatusEl = document.getElementById('midiAccessStatus');
+  const deviceSelect = document.getElementById('midiDeviceSelect');
+  const channelSelect = document.getElementById('midiChannelSelect');
   
   if (!navigator.requestMIDIAccess) {
-    if (midiStatusEl) midiStatusEl.textContent = 'MIDI not supported';
+    if (midiAccessStatusEl) {
+      midiAccessStatusEl.textContent = 'Not supported by browser';
+      midiAccessStatusEl.className = 'value error';
+    }
     console.warn('Web MIDI API not supported');
     return;
+  }
+  
+  // Show checking status while we request access
+  if (midiAccessStatusEl) {
+    midiAccessStatusEl.textContent = 'Requesting access...';
+    midiAccessStatusEl.className = 'value';
   }
   
   try {
     midiAccess = await navigator.requestMIDIAccess();
     
-    const inputs = Array.from(midiAccess.inputs.values());
-    if (inputs.length > 0) {
-      midiConnected = true;
-      inputs.forEach(input => {
-        input.onmidimessage = handleMidiMessage;
-      });
-      
-      if (midiStatusEl) midiStatusEl.textContent = `MIDI: ${inputs[0].name}`;
-      
-      // Enable keyboard modulators
-      if (workletNode) {
-        workletNode.port.postMessage({ type: 'set-keyboard-pitch-enabled', value: true });
-        workletNode.port.postMessage({ type: 'set-keyboard-gate-enabled', value: true });
-      }
-    } else {
-      if (midiStatusEl) midiStatusEl.textContent = 'MIDI: No devices';
+    if (midiAccessStatusEl) {
+      midiAccessStatusEl.textContent = 'Access granted';
+      midiAccessStatusEl.className = 'value success';
     }
     
-    // Listen for device connections
+    // Enable the selects now that we have MIDI access
+    if (deviceSelect) deviceSelect.disabled = false;
+    if (channelSelect) channelSelect.disabled = false;
+    
+    // Populate device dropdown and attach handlers
+    populateMidiDevices();
+    attachMidiHandlers();
+    
+    // Set up channel select handler
+    if (channelSelect) {
+      channelSelect.addEventListener('change', () => {
+        selectedMidiChannel = channelSelect.value;
+        console.log(`MIDI channel set to: ${selectedMidiChannel === 'all' ? 'All' : parseInt(selectedMidiChannel) + 1}`);
+      });
+    }
+    
+    // Set up device select handler
+    if (deviceSelect) {
+      deviceSelect.addEventListener('change', () => {
+        selectedMidiInputId = deviceSelect.value;
+        console.log(`MIDI device set to: ${selectedMidiInputId === 'all' ? 'All devices' : selectedMidiInputId}`);
+        attachMidiHandlers();
+      });
+    }
+    
+    // Listen for device hot-plug events
     midiAccess.onstatechange = (e) => {
-      if (e.port.type === 'input') {
-        if (e.port.state === 'connected') {
-          e.port.onmidimessage = handleMidiMessage;
-          midiConnected = true;
-          if (midiStatusEl) midiStatusEl.textContent = `MIDI: ${e.port.name}`;
-          if (workletNode) {
-            workletNode.port.postMessage({ type: 'set-keyboard-pitch-enabled', value: true });
-            workletNode.port.postMessage({ type: 'set-keyboard-gate-enabled', value: true });
-          }
-        }
-      }
+      console.log(`MIDI state change: ${e.port.name} ${e.port.state}`);
+      populateMidiDevices();
+      attachMidiHandlers();
     };
     
   } catch (err) {
     console.error('MIDI access failed:', err);
-    if (midiStatusEl) midiStatusEl.textContent = 'MIDI: Access denied';
+    if (midiAccessStatusEl) {
+      midiAccessStatusEl.textContent = 'Access denied - check browser permissions';
+      midiAccessStatusEl.className = 'value error';
+    }
+  }
+}
+
+function populateMidiDevices() {
+  const deviceSelect = document.getElementById('midiDeviceSelect');
+  if (!deviceSelect || !midiAccess) return;
+  
+  const currentValue = deviceSelect.value;
+  
+  // Clear existing options except "All devices"
+  deviceSelect.innerHTML = '<option value="all">All devices</option>';
+  
+  const inputs = Array.from(midiAccess.inputs.values());
+  inputs.forEach(input => {
+    const option = document.createElement('option');
+    option.value = input.id;
+    option.textContent = input.name || `Device ${input.id}`;
+    deviceSelect.appendChild(option);
+  });
+  
+  // Restore selection if device still exists, otherwise default to 'all'
+  if (currentValue !== 'all' && inputs.some(i => i.id === currentValue)) {
+    deviceSelect.value = currentValue;
+    selectedMidiInputId = currentValue;
+  } else if (currentValue !== 'all') {
+    deviceSelect.value = 'all';
+    selectedMidiInputId = 'all';
+  }
+  
+  // Update connected state
+  midiConnected = inputs.length > 0;
+  
+  // Enable keyboard modulators if we have devices
+  if (midiConnected && workletNode) {
+    workletNode.port.postMessage({ type: 'set-keyboard-pitch-enabled', value: true });
+    workletNode.port.postMessage({ type: 'set-keyboard-gate-enabled', value: true });
+  }
+}
+
+function attachMidiHandlers() {
+  if (!midiAccess) return;
+  
+  const inputs = Array.from(midiAccess.inputs.values());
+  
+  // Detach all handlers first
+  inputs.forEach(input => {
+    input.onmidimessage = null;
+  });
+  
+  // Attach handlers based on selection
+  if (selectedMidiInputId === 'all') {
+    inputs.forEach(input => {
+      input.onmidimessage = handleMidiMessage;
+    });
+  } else {
+    const selectedInput = inputs.find(i => i.id === selectedMidiInputId);
+    if (selectedInput) {
+      selectedInput.onmidimessage = handleMidiMessage;
+    }
   }
 }
 
